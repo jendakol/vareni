@@ -1,0 +1,14 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: cooking
+      POSTGRES_PASSWORD: cooking
+      POSTGRES_DB: cookingapp
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+
+volumes:
+  pgdata:

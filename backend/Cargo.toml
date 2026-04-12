@@ -1,0 +1,37 @@
+[package]
+name = "cooking-app"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+axum = { version = "0.8", features = ["multipart", "macros"] }
+tokio = { version = "1", features = ["full"] }
+sqlx = { version = "0.8", features = ["postgres", "runtime-tokio", "uuid", "time", "json", "bigdecimal", "tls-native-tls"] }
+reqwest = { version = "0.12", features = ["json", "stream", "multipart"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4", "serde"] }
+time = { version = "0.3", features = ["serde", "formatting", "parsing"] }
+bcrypt = "0.17"
+jsonwebtoken = "9"
+tower-http = { version = "0.6", features = ["fs", "cors"] }
+tower = "0.5"
+anyhow = "1"
+thiserror = "2"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tokio-stream = "0.1"
+futures = "0.3"
+base64 = "0.22"
+scraper = "0.22"
+web-push = "0.10"
+rand = "0.9"
+bytes = "1"
+dotenvy = "0.15"
+
+[dev-dependencies]
+testcontainers = "0.24"
+testcontainers-modules = { version = "0.12", features = ["postgres"] }
+tower = { version = "0.5", features = ["util"] }
+http-body-util = "0.1"
+mime = "0.3"
