@@ -46,7 +46,7 @@
         <h2 class="text-lg font-semibold text-stone-700">Náhled</h2>
         <button @click="preview = null" class="text-stone-500 hover:text-stone-700 text-sm">← Zpět</button>
       </div>
-      <RecipeForm :initial="preview" @save="handleSave" />
+      <RecipeForm :key="previewKey" :initial="preview" @save="handleSave" />
     </div>
 
     <div v-if="error" class="mt-4 bg-red-50 text-red-700 p-3 rounded-lg text-sm">{{ error }}</div>
@@ -71,6 +71,7 @@ const textInput = ref('')
 const urlInput = ref('')
 const imageFile = ref<File | null>(null)
 const preview = ref<any>(null)
+const previewKey = ref(0)
 const loading = ref(false)
 const error = ref('')
 
@@ -89,8 +90,10 @@ async function handleIngest() {
     if (activeTab.value === 'photo' && imageFile.value) form.append('image', imageFile.value)
     if (activeTab.value === 'url') form.append('url', urlInput.value)
 
-    preview.value = await ingest(form)
-    preview.value.source_type = activeTab.value
+    const result = await ingest(form)
+    result.source_type = activeTab.value
+    preview.value = result
+    previewKey.value++
   } catch (e: any) {
     error.value = e.message
   } finally {
