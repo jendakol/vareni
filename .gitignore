@@ -8,3 +8,4 @@
 /uploads/
 .claude/
 frontend/tsconfig.tsbuildinfo
+.idea/
