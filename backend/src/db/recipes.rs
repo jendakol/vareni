@@ -100,7 +100,8 @@ pub async fn list(
             },
             order = match sort {
                 "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" => "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                "prep_time" =>
+                    "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
                 _ => "ORDER BY r.updated_at DESC",
             },
         );
@@ -180,7 +181,8 @@ pub async fn list(
             },
             order = match sort {
                 "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" => "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                "prep_time" =>
+                    "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
                 _ => "ORDER BY r.updated_at DESC",
             },
         );

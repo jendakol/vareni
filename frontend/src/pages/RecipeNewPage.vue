@@ -88,7 +88,12 @@ async function handleIngest() {
   const toastId = activeTab.value === 'photo'
     ? toast.info('Zpracovávám fotku...', { timeout: false })
     : activeTab.value === 'url'
-      ? toast.info('Stahuji recept...', { timeout: false })
+      ? toast.info(
+          urlInput.value.includes('instagram.com')
+            ? 'Importuji z Instagramu...'
+            : 'Stahuji recept...',
+          { timeout: false }
+        )
       : null
   try {
     const form = new FormData()
@@ -103,6 +108,9 @@ async function handleIngest() {
 
     const result = await ingest(form)
     result.source_type = activeTab.value
+    if (activeTab.value === 'url') {
+      result.source_url = urlInput.value
+    }
     preview.value = result
     previewKey.value++
     toast.success('Recept zpracován')

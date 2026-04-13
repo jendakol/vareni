@@ -4,6 +4,7 @@ use std::sync::Arc;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 
+#[allow(dead_code)]
 pub struct TestContext {
     pub pool: PgPool,
     pub router: Router,
@@ -91,6 +92,7 @@ impl TestContext {
         let state = cooking_app::AppState {
             pool: pool.clone(),
             config: Arc::new(config),
+            http_client: reqwest::Client::new(),
         };
         let router = cooking_app::create_router(state);
 
@@ -106,6 +108,7 @@ impl TestContext {
     }
 
     /// Build a request with auth header for user 1
+    #[allow(dead_code)]
     pub fn auth_header_1(&self) -> (String, String) {
         (
             "Authorization".into(),
@@ -114,6 +117,7 @@ impl TestContext {
     }
 
     /// Build a request with auth header for user 2
+    #[allow(dead_code)]
     pub fn auth_header_2(&self) -> (String, String) {
         (
             "Authorization".into(),
