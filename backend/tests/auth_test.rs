@@ -28,7 +28,7 @@ async fn login_valid_credentials() {
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
     assert!(json["token"].is_string());
-    assert_eq!(json["user"]["email"], "Test User 1");
+    assert_eq!(json["user"]["name"], "Test User 1");
     // password_hash must not be in response
     assert!(json["user"]["password_hash"].is_null());
 }
@@ -121,6 +121,6 @@ async fn me_with_valid_token() {
 
     let body = resp.into_body().collect().await.unwrap().to_bytes();
     let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
-    assert_eq!(json["email"], "Test User 1");
+    assert_eq!(json["name"], "Test User 1");
     assert!(json["dietary_restrictions"].is_array());
 }

@@ -18,6 +18,7 @@ pub mod routes;
 pub struct AppState {
     pub pool: sqlx::PgPool,
     pub config: Arc<config::Config>,
+    pub http_client: reqwest::Client,
 }
 
 pub fn create_router(state: AppState) -> Router {

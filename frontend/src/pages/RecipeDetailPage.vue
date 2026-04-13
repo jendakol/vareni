@@ -118,7 +118,11 @@ const loadError = ref(false)
 
 const sourceDomain = computed(() => {
   if (!recipe.value?.source_url) return ''
-  try { return new URL(recipe.value.source_url).hostname.replace('www.', '') } catch { return recipe.value.source_url }
+  try {
+    const hostname = new URL(recipe.value.source_url).hostname
+    if (hostname.endsWith('instagram.com')) return 'Instagram'
+    return hostname.replace('www.', '')
+  } catch { return recipe.value.source_url }
 })
 
 const editData = computed(() => {

@@ -90,9 +90,17 @@ pub async fn ingest(
             let url = url
                 .filter(|u| !u.trim().is_empty())
                 .ok_or_else(|| AppError::BadRequest("Zadejte URL receptu".into()))?;
-            ai::ingest::parse_url(&ai_client, &reqwest::Client::new(), &url)
+            ai::ingest::parse_url(&ai_client, &state.http_client, &url)
                 .await
-                .map_err(AppError::Internal)?
+                .map_err(|e| {
+                    let msg = e.to_string();
+                    // Surface user-facing messages (Czech) as BadRequest, not 500
+                    if msg.starts_with("Nepodařilo") {
+                        AppError::BadRequest(msg)
+                    } else {
+                        AppError::Internal(e)
+                    }
+                })?
         }
         other => {
             return Err(AppError::BadRequest(format!(

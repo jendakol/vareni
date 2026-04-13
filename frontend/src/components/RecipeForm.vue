@@ -182,6 +182,7 @@ const form = reactive({
   steps: props.initial?.steps || [],
   tags: props.initial?.tags || [],
   source_type: props.initial?.source_type || 'manual',
+  source_url: props.initial?.source_url || null,
 })
 
 const tagsInput = computed({

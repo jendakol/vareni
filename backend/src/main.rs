@@ -26,9 +26,33 @@ async fn main() -> anyhow::Result<()> {
 
     push_notifier::start_notifier(pool.clone(), config.push_notify_hour);
 
+    let mut default_headers = reqwest::header::HeaderMap::new();
+    default_headers.insert(
+        reqwest::header::ACCEPT,
+        "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8"
+            .parse()
+            .unwrap(),
+    );
+    default_headers.insert(
+        reqwest::header::ACCEPT_LANGUAGE,
+        "cs,en;q=0.5".parse().unwrap(),
+    );
+    default_headers.insert("Sec-Fetch-Dest", "document".parse().unwrap());
+    default_headers.insert("Sec-Fetch-Mode", "navigate".parse().unwrap());
+    default_headers.insert("Sec-Fetch-Site", "none".parse().unwrap());
+    default_headers.insert("Sec-Fetch-User", "?1".parse().unwrap());
+    default_headers.insert("Upgrade-Insecure-Requests", "1".parse().unwrap());
+
+    let http_client = reqwest::Client::builder()
+        .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36")
+        .default_headers(default_headers)
+        .timeout(std::time::Duration::from_secs(10))
+        .build()?;
+
     let state = AppState {
         pool,
         config: Arc::new(config),
+        http_client,
     };
 
     let app = create_router(state);
