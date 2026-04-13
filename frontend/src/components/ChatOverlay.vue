@@ -133,9 +133,13 @@ async function send() {
 
 async function saveChanges() {
   if (!pendingUpdate.value) return
-  await updateRecipe(props.recipeId, pendingUpdate.value)
-  pendingUpdate.value = null
-  hasUpdates.value = false
-  emit('update')
+  try {
+    await updateRecipe(props.recipeId, pendingUpdate.value)
+    pendingUpdate.value = null
+    hasUpdates.value = false
+    emit('update')
+  } catch (e: any) {
+    messages.value.push({ role: 'assistant', text: `Chyba při ukládání: ${e.message}` })
+  }
 }
 </script>

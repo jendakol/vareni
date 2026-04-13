@@ -5,7 +5,7 @@ use crate::AppState;
 use crate::auth::{AuthUser, encode_jwt};
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::{LoginRequest, LoginResponse, UserWithRestrictions};
+use crate::models::{LoginRequest, LoginResponse, User, UserWithRestrictions};
 
 pub async fn login(
     State(state): State<AppState>,
@@ -45,4 +45,12 @@ pub async fn me(
         user,
         dietary_restrictions: restrictions,
     }))
+}
+
+pub async fn list_users(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+) -> AppResult<Json<Vec<User>>> {
+    let users = db::users::list_all(&state.pool).await?;
+    Ok(Json(users))
 }

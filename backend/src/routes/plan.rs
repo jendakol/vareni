@@ -17,6 +17,13 @@ use crate::models::{
 #[derive(Debug, serde::Deserialize)]
 pub struct SuggestRequest {
     pub prompt: String,
+    /// "both" (default) = merge all users' restrictions, "me" = only current user's
+    #[serde(default = "default_planning_for")]
+    pub planning_for: String,
+}
+
+fn default_planning_for() -> String {
+    "both".into()
 }
 
 pub async fn suggest(
@@ -25,8 +32,12 @@ pub async fn suggest(
     Json(body): Json<SuggestRequest>,
 ) -> AppResult<Json<Vec<ai::plan::SuggestedEntry>>> {
     let history = db::meal_plan::history(&state.pool, 90).await?;
-    let restrictions = db::users::get_dietary_restrictions(&state.pool, auth.user_id).await?;
-    let (recipes, _) = db::recipes::list(&state.pool, None, None, 1, 1000).await?;
+    let restrictions = if body.planning_for == "me" {
+        db::users::get_dietary_restrictions(&state.pool, auth.user_id).await?
+    } else {
+        db::users::get_all_dietary_restrictions(&state.pool).await?
+    };
+    let (recipes, _) = db::recipes::list(&state.pool, None, None, "recent", 1, 1000).await?;
 
     let history_json = serde_json::to_string(&history).unwrap_or_default();
     let restrictions_json = serde_json::to_string(&restrictions).unwrap_or_default();
@@ -60,7 +71,8 @@ pub async fn create(
     auth: AuthUser,
     Json(body): Json<CreateMealPlanRequest>,
 ) -> AppResult<(StatusCode, Json<MealPlanEntry>)> {
-    let entry = db::meal_plan::create(&state.pool, auth.user_id, &body).await?;
+    let user_id = body.for_user_id.unwrap_or(auth.user_id);
+    let entry = db::meal_plan::create(&state.pool, user_id, &body).await?;
     Ok((StatusCode::CREATED, Json(entry)))
 }
 

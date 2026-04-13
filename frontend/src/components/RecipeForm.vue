@@ -2,7 +2,30 @@
   <form @submit.prevent="$emit('save', form)" class="space-y-6">
     <div :class="isGuessed('title') && 'ring-2 ring-amber-400 rounded-lg'">
       <label class="block text-sm font-medium text-stone-600 mb-1">Název</label>
-      <input v-model="form.title" required class="w-full px-4 py-3 border border-stone-300 rounded-lg text-lg" />
+      <div class="flex gap-2">
+        <div class="relative">
+          <button type="button" @click="showEmojiPicker = !showEmojiPicker"
+            class="w-12 h-12 border border-stone-300 rounded-lg text-2xl flex items-center justify-center hover:bg-stone-50"
+            :title="form.emoji ? 'Změnit emoji' : 'Přidat emoji'">
+            {{ form.emoji || '😀' }}
+          </button>
+          <div v-if="showEmojiPicker"
+            class="absolute z-20 top-14 left-0 bg-white border border-stone-200 rounded-lg shadow-lg p-2 w-72">
+            <input v-model="emojiSearch" ref="emojiSearchRef" placeholder="Hledat emoji..."
+              class="w-full px-3 py-1.5 border border-stone-200 rounded-lg text-sm mb-2" />
+            <div class="grid grid-cols-7 gap-1 max-h-48 overflow-y-auto">
+              <button v-for="e in filteredEmojis" :key="e.emoji" type="button"
+                @click="form.emoji = e.emoji; showEmojiPicker = false; emojiSearch = ''"
+                class="w-8 h-8 text-xl flex items-center justify-center rounded hover:bg-orange-50"
+                :title="e.name">
+                {{ e.emoji }}
+              </button>
+            </div>
+            <p v-if="filteredEmojis.length === 0" class="text-sm text-stone-400 text-center py-2">Nic nenalezeno</p>
+          </div>
+        </div>
+        <input v-model="form.title" required class="flex-1 px-4 py-3 border border-stone-300 rounded-lg text-lg" />
+      </div>
     </div>
     <div :class="isGuessed('description') && 'ring-2 ring-amber-400 rounded-lg'">
       <label class="block text-sm font-medium text-stone-600 mb-1">Popis
@@ -73,7 +96,7 @@
 </template>
 
 <script setup lang="ts">
-import { reactive, computed, watch } from 'vue'
+import { reactive, ref, computed, watch } from 'vue'
 
 const props = defineProps<{ initial?: any }>()
 defineEmits<{ save: [data: any] }>()
@@ -84,9 +107,74 @@ function isGuessed(field: string): boolean {
   return guessedFields.value.has(field)
 }
 
+const showEmojiPicker = ref(false)
+const emojiSearch = ref('')
+const emojiSearchRef = ref<HTMLInputElement | null>(null)
+
+const emojiList = [
+  { emoji: '🍝', name: 'pasta spaghetti těstoviny' },
+  { emoji: '🍕', name: 'pizza' },
+  { emoji: '🥗', name: 'salát salad green' },
+  { emoji: '🍲', name: 'polévka soup hrnec pot' },
+  { emoji: '🥘', name: 'pánev pan paella' },
+  { emoji: '🍜', name: 'nudle noodles ramen' },
+  { emoji: '🍛', name: 'kari curry' },
+  { emoji: '🥟', name: 'knedlík dumpling pierogi' },
+  { emoji: '🫕', name: 'fondue sýr cheese zapečený' },
+  { emoji: '🥦', name: 'brokolice broccoli zelenina' },
+  { emoji: '🍶', name: 'omáčka sauce' },
+  { emoji: '🐽', name: 'vepřové pork prase pig' },
+  { emoji: '🐔', name: 'kuře chicken' },
+  { emoji: '🐟', name: 'ryba fish losos salmon' },
+  { emoji: '🥩', name: 'maso steak hovězí beef' },
+  { emoji: '🍗', name: 'kuřecí stehno drumstick' },
+  { emoji: '🥚', name: 'vejce egg' },
+  { emoji: '🧀', name: 'sýr cheese' },
+  { emoji: '🥕', name: 'mrkev carrot' },
+  { emoji: '🍅', name: 'rajče tomato' },
+  { emoji: '🌽', name: 'kukuřice corn' },
+  { emoji: '🍄', name: 'houby mushroom žampion' },
+  { emoji: '🥔', name: 'brambory potato' },
+  { emoji: '🍆', name: 'lilek eggplant' },
+  { emoji: '🫑', name: 'paprika pepper' },
+  { emoji: '🧅', name: 'cibule onion' },
+  { emoji: '🍋', name: 'citron lemon' },
+  { emoji: '🥒', name: 'okurka cucumber' },
+  { emoji: '🦐', name: 'krevety shrimp' },
+  { emoji: '🦑', name: 'kalamáry squid' },
+  { emoji: '🐙', name: 'chobotnice octopus' },
+  { emoji: '🦆', name: 'kachna duck' },
+  { emoji: '🪿', name: 'husa goose' },
+  { emoji: '🎃', name: 'dýně pumpkin' },
+  { emoji: '🥧', name: 'koláč pie dort' },
+  { emoji: '🍰', name: 'dort cake zákusek' },
+  { emoji: '🥞', name: 'lívanec pancake palačinka' },
+  { emoji: '🍞', name: 'chleba bread pečivo' },
+  { emoji: '🥖', name: 'bageta baguette' },
+  { emoji: '🌮', name: 'taco tortilla mexické' },
+  { emoji: '🌯', name: 'burrito wrap' },
+  { emoji: '🍔', name: 'burger hamburger' },
+  { emoji: '🥙', name: 'kebab falafel pita' },
+  { emoji: '🍣', name: 'sushi japonské' },
+  { emoji: '🥘', name: 'pánev stir fry' },
+  { emoji: '🫘', name: 'fazole beans luštěniny' },
+  { emoji: '🍚', name: 'rýže rice rizoto' },
+]
+
+const filteredEmojis = computed(() => {
+  const q = emojiSearch.value.toLowerCase().trim()
+  if (!q) return emojiList
+  return emojiList.filter(e => e.name.toLowerCase().includes(q) || e.emoji === q)
+})
+
+watch(showEmojiPicker, (v) => {
+  if (v) setTimeout(() => emojiSearchRef.value?.focus(), 50)
+})
+
 const form = reactive({
   title: props.initial?.title || '',
   description: props.initial?.description || '',
+  emoji: props.initial?.emoji || null,
   servings: props.initial?.servings || null,
   prep_time_min: props.initial?.prep_time_min || null,
   cook_time_min: props.initial?.cook_time_min || null,

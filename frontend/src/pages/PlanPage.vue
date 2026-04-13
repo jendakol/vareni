@@ -2,21 +2,45 @@
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-bold text-stone-800">Plan</h1>
-      <div class="flex gap-2">
-        <button @click="shiftWeek(-1)" class="px-3 py-1 border rounded-lg">←</button>
-        <span class="px-3 py-1 text-stone-600">{{ weekLabel }}</span>
-        <button @click="shiftWeek(1)" class="px-3 py-1 border rounded-lg">→</button>
+      <div class="flex gap-2 items-center">
+        <button @click="shiftPeriod(-1)" class="px-3 py-1 border rounded-lg">&larr;</button>
+        <span class="px-3 py-1 text-stone-600">{{ periodLabel }}</span>
+        <button @click="shiftPeriod(1)" class="px-3 py-1 border rounded-lg">&rarr;</button>
       </div>
     </div>
 
-    <!-- Suggest -->
-    <div class="mb-6 flex gap-2">
-      <input v-model="suggestPrompt" placeholder="Např. Návrh jídla na tento týden..."
-        class="flex-1 px-4 py-2 border border-stone-300 rounded-lg" />
-      <button @click="handleSuggest" :disabled="suggesting"
-        class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
-        Navrhnout
+    <!-- Day count -->
+    <div class="flex gap-2 mb-4 flex-wrap">
+      <button v-for="n in dayOptions" :key="n" @click="numDays = n; loadEntries()"
+        class="px-3 py-1 rounded-full text-sm"
+        :class="numDays === n ? 'bg-orange-600 text-white' : 'bg-stone-100 text-stone-600'">
+        {{ n === 7 ? 'Týden' : n === 14 ? '2 týdny' : `${n} dní` }}
       </button>
+    </div>
+
+    <!-- Suggest -->
+    <div class="mb-6 space-y-2">
+      <div class="space-y-2 sm:space-y-0 sm:flex sm:gap-2">
+        <input v-model="suggestPrompt" :placeholder="suggestPlaceholder"
+          class="w-full sm:flex-1 px-4 py-2 border border-stone-300 rounded-lg" />
+        <button @click="handleSuggest" :disabled="suggesting"
+          class="w-full sm:w-auto px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
+          Navrhnout
+        </button>
+      </div>
+      <div class="flex items-center gap-3 flex-wrap">
+        <span class="text-sm text-stone-500">Dietní omezení:</span>
+        <button @click="planningFor = 'both'"
+          class="px-3 py-1 rounded-full text-sm"
+          :class="planningFor === 'both' ? 'bg-orange-600 text-white' : 'bg-stone-100 text-stone-600'">
+          Pro oba
+        </button>
+        <button @click="planningFor = 'me'"
+          class="px-3 py-1 rounded-full text-sm"
+          :class="planningFor === 'me' ? 'bg-orange-600 text-white' : 'bg-stone-100 text-stone-600'">
+          Pro mě
+        </button>
+      </div>
     </div>
 
     <!-- Calendar grid -->
@@ -44,35 +68,57 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, watch } from 'vue'
+import { useToast } from 'vue-toastification'
 import * as planApi from '../api/plan'
 
-const weekOffset = ref(0)
+const toast = useToast()
+
+const dayOptions = [3, 5, 7, 14]
+const numDays = ref(7)
+const offset = ref(0)
 const entries = ref<planApi.MealPlanEntry[]>([])
 const suggestions = ref<any[]>([])
 const suggestPrompt = ref('')
 const suggesting = ref(false)
+const planningFor = ref<'both' | 'me'>('both')
 
 const startDate = computed(() => {
+  if (numDays.value === 7 || numDays.value === 14) {
+    // Align to Monday
+    const d = new Date()
+    d.setDate(d.getDate() - d.getDay() + 1 + offset.value * numDays.value)
+    return d
+  }
+  // For other counts, start from today + offset
   const d = new Date()
-  d.setDate(d.getDate() - d.getDay() + 1 + weekOffset.value * 7) // Monday
+  d.setDate(d.getDate() + offset.value * numDays.value)
   return d
 })
 
-const weekLabel = computed(() => {
-  const s = startDate.value
-  const e = new Date(s)
-  e.setDate(e.getDate() + 6)
-  return `${fmt(s)} – ${fmt(e)}`
+const endDate = computed(() => {
+  const d = new Date(startDate.value)
+  d.setDate(d.getDate() + numDays.value - 1)
+  return d
 })
+
+const periodLabel = computed(() => `${fmtCz(startDate.value)} – ${fmtCz(endDate.value)}`)
+
+const suggestPlaceholder = computed(() =>
+  `Návrh jídla na ${numDays.value} ${numDays.value < 5 ? 'dny' : 'dní'}...`
+)
 
 function fmt(d: Date) {
   return d.toISOString().slice(0, 10)
 }
 
+function fmtCz(d: Date) {
+  return d.toLocaleDateString('cs-CZ', { day: 'numeric', month: 'numeric' })
+}
+
 const days = computed(() => {
   const result = []
-  for (let i = 0; i < 7; i++) {
+  for (let i = 0; i < numDays.value; i++) {
     const d = new Date(startDate.value)
     d.setDate(d.getDate() + i)
     const date = fmt(d)
@@ -90,47 +136,69 @@ function formatDay(date: string) {
   return d.toLocaleDateString('cs-CZ', { weekday: 'long', day: 'numeric', month: 'numeric' })
 }
 
-function shiftWeek(dir: number) {
-  weekOffset.value += dir
+function shiftPeriod(dir: number) {
+  offset.value += dir
   loadEntries()
 }
 
 async function loadEntries() {
-  const from = fmt(startDate.value)
-  const to = fmt(new Date(startDate.value.getTime() + 6 * 86400000))
-  entries.value = await planApi.listPlan(from, to)
+  try {
+    const from = fmt(startDate.value)
+    const to = fmt(endDate.value)
+    entries.value = await planApi.listPlan(from, to)
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se načíst plán')
+  }
 }
 
 async function handleSuggest() {
   suggesting.value = true
   try {
-    suggestions.value = await planApi.suggestPlan(suggestPrompt.value)
+    const dateRange = `od ${fmt(startDate.value)} do ${fmt(endDate.value)}`
+    const fullPrompt = suggestPrompt.value
+      ? `${suggestPrompt.value} (${dateRange})`
+      : `Navrhni jídla ${dateRange}`
+    suggestions.value = await planApi.suggestPlan(fullPrompt, planningFor.value)
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se navrhnout jídla')
   } finally {
     suggesting.value = false
   }
 }
 
 async function confirmEntry(entry: any) {
-  await planApi.createPlanEntry({
-    date: entry.date,
-    meal_type: entry.meal_type,
-    recipe_id: entry.recipe_id,
-    free_text: entry.free_text,
-    note: entry.note,
-    status: 'confirmed',
-  })
-  suggestions.value = suggestions.value.filter(s => !(s.date === entry.date && s.meal_type === entry.meal_type))
-  await loadEntries()
+  try {
+    await planApi.createPlanEntry({
+      date: entry.date,
+      meal_type: entry.meal_type,
+      recipe_id: entry.recipe_id,
+      free_text: entry.free_text,
+      note: entry.note,
+      status: 'confirmed',
+    })
+    suggestions.value = suggestions.value.filter(s => !(s.date === entry.date && s.meal_type === entry.meal_type))
+    await loadEntries()
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se potvrdit jídlo')
+  }
 }
 
 async function removeEntry(id: string) {
   if (id.startsWith('sug-')) {
     suggestions.value = suggestions.value.filter(s => `sug-${s.date}-${s.meal_type}` !== id)
   } else {
-    await planApi.deletePlanEntry(id)
-    await loadEntries()
+    try {
+      await planApi.deletePlanEntry(id)
+      await loadEntries()
+    } catch (e: any) {
+      toast.error(e.message || 'Nepodařilo se smazat položku')
+    }
   }
 }
+
+watch(numDays, () => {
+  offset.value = 0
+})
 
 onMounted(loadEntries)
 </script>

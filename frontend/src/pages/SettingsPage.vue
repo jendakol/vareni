@@ -22,34 +22,48 @@
 
 <script setup lang="ts">
 import { ref, onMounted } from 'vue'
+import { useToast } from 'vue-toastification'
 import { useAuthStore } from '../stores/auth'
 import { apiFetch } from '../api/client'
 
 const authStore = useAuthStore()
+const toast = useToast()
 const restrictions = ref<string[]>([])
 const newRestriction = ref('')
 
 async function loadRestrictions() {
-  await authStore.fetchMe()
-  restrictions.value = authStore.user?.dietary_restrictions || []
+  try {
+    await authStore.fetchMe()
+    restrictions.value = authStore.user?.dietary_restrictions || []
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se načíst nastavení')
+  }
 }
 
 async function addRestriction() {
   if (!newRestriction.value.trim()) return
-  await apiFetch('/settings/restrictions', {
-    method: 'POST',
-    body: JSON.stringify({ restriction: newRestriction.value.trim() }),
-  })
-  newRestriction.value = ''
-  await loadRestrictions()
+  try {
+    await apiFetch('/settings/restrictions', {
+      method: 'POST',
+      body: JSON.stringify({ restriction: newRestriction.value.trim() }),
+    })
+    newRestriction.value = ''
+    await loadRestrictions()
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se přidat omezení')
+  }
 }
 
 async function removeRestriction(r: string) {
-  await apiFetch('/settings/restrictions', {
-    method: 'DELETE',
-    body: JSON.stringify({ restriction: r }),
-  })
-  await loadRestrictions()
+  try {
+    await apiFetch('/settings/restrictions', {
+      method: 'DELETE',
+      body: JSON.stringify({ restriction: r }),
+    })
+    await loadRestrictions()
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se odebrat omezení')
+  }
 }
 
 onMounted(loadRestrictions)

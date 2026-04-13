@@ -7,6 +7,9 @@ export interface Recipe {
   servings: number | null
   prep_time_min: number | null
   cook_time_min: number | null
+  emoji: string | null
+  source_type: string | null
+  source_url: string | null
   tags?: string[]
   ingredients?: Ingredient[]
   steps?: Step[]
@@ -35,11 +38,12 @@ export interface Paginated<T> {
   per_page: number
 }
 
-export function listRecipes(params: { q?: string; tag?: string; page?: number }) {
+export function listRecipes(params: { q?: string; tag?: string; page?: number; sort?: string }) {
   const search = new URLSearchParams()
   if (params.q) search.set('q', params.q)
   if (params.tag) search.set('tag', params.tag)
   if (params.page) search.set('page', String(params.page))
+  if (params.sort) search.set('sort', params.sort)
   return apiFetch<Paginated<Recipe>>(`/recipes?${search}`)
 }
 

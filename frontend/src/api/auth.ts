@@ -22,3 +22,7 @@ export function login(name: string, password: string) {
 export function me() {
   return apiFetch<User>('/auth/me')
 }
+
+export function listUsers() {
+  return apiFetch<User[]>('/auth/users')
+}

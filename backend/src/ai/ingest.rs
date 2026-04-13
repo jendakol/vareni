@@ -83,24 +83,33 @@ pub async fn parse_image(
     image_data: &[u8],
     media_type: &str,
 ) -> anyhow::Result<ParsedRecipe> {
-    let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, image_data);
+    parse_images(client, &[(image_data, media_type)]).await
+}
+
+pub async fn parse_images(
+    client: &AnthropicClient,
+    images: &[(&[u8], &str)],
+) -> anyhow::Result<ParsedRecipe> {
+    let mut content = Vec::new();
+    for (data, media_type) in images {
+        let b64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, data);
+        content.push(serde_json::json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": media_type,
+                "data": b64,
+            }
+        }));
+    }
+    content.push(serde_json::json!({
+        "type": "text",
+        "text": "Extract the recipe from these images. They are all part of the same recipe."
+    }));
 
     let messages = vec![Message {
         role: "user".into(),
-        content: serde_json::json!([
-            {
-                "type": "image",
-                "source": {
-                    "type": "base64",
-                    "media_type": media_type,
-                    "data": b64,
-                }
-            },
-            {
-                "type": "text",
-                "text": "Extract the recipe from this image."
-            }
-        ]),
+        content: serde_json::Value::Array(content),
     }];
 
     let response = client

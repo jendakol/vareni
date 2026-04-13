@@ -24,9 +24,12 @@
       </div>
 
       <div v-if="activeTab === 'photo'" class="space-y-4">
-        <input type="file" accept="image/*" capture="environment" @change="handleFile"
+        <input type="file" accept="image/*" multiple @change="handleFiles"
           class="block w-full text-sm text-stone-500 file:mr-4 file:py-2 file:px-4 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 file:font-medium" />
-        <button @click="handleIngest" :disabled="loading || !imageFile" class="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
+        <p v-if="imageFiles.length > 0" class="text-sm text-stone-500">
+          {{ imageFiles.length }} {{ imageFiles.length === 1 ? 'fotka' : imageFiles.length < 5 ? 'fotky' : 'fotek' }}
+        </p>
+        <button @click="handleIngest" :disabled="loading || imageFiles.length === 0" class="px-6 py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50">
           {{ loading ? 'Zpracovávám...' : 'Zpracovat' }}
         </button>
       </div>
@@ -49,17 +52,18 @@
       <RecipeForm :key="previewKey" :initial="preview" @save="handleSave" />
     </div>
 
-    <div v-if="error" class="mt-4 bg-red-50 text-red-700 p-3 rounded-lg text-sm">{{ error }}</div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
+import { useToast } from 'vue-toastification'
 import { ingest, createRecipe } from '../api/recipes'
 import RecipeForm from '../components/RecipeForm.vue'
 
 const router = useRouter()
+const toast = useToast()
 const activeTab = ref('manual')
 const tabs = [
   { key: 'manual', label: 'Napsat' },
@@ -69,34 +73,43 @@ const tabs = [
 
 const textInput = ref('')
 const urlInput = ref('')
-const imageFile = ref<File | null>(null)
+const imageFiles = ref<File[]>([])
 const preview = ref<any>(null)
 const previewKey = ref(0)
 const loading = ref(false)
-const error = ref('')
 
-function handleFile(e: Event) {
+function handleFiles(e: Event) {
   const input = e.target as HTMLInputElement
-  imageFile.value = input.files?.[0] || null
+  imageFiles.value = input.files ? Array.from(input.files) : []
 }
 
 async function handleIngest() {
   loading.value = true
-  error.value = ''
+  const toastId = activeTab.value === 'photo'
+    ? toast.info('Zpracovávám fotku...', { timeout: false })
+    : activeTab.value === 'url'
+      ? toast.info('Stahuji recept...', { timeout: false })
+      : null
   try {
     const form = new FormData()
     form.append('source_type', activeTab.value)
     if (activeTab.value === 'manual') form.append('text', textInput.value)
-    if (activeTab.value === 'photo' && imageFile.value) form.append('image', imageFile.value)
+    if (activeTab.value === 'photo') {
+      for (const file of imageFiles.value) {
+        form.append('image', file)
+      }
+    }
     if (activeTab.value === 'url') form.append('url', urlInput.value)
 
     const result = await ingest(form)
     result.source_type = activeTab.value
     preview.value = result
     previewKey.value++
+    toast.success('Recept zpracován')
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message || 'Zpracování selhalo')
   } finally {
+    if (toastId !== null) toast.dismiss(toastId)
     loading.value = false
   }
 }
@@ -104,9 +117,10 @@ async function handleIngest() {
 async function handleSave(data: any) {
   try {
     const recipe = await createRecipe(data)
+    toast.success('Recept uložen')
     router.push(`/recipes/${recipe.id}`)
   } catch (e: any) {
-    error.value = e.message
+    toast.error(e.message || 'Nepodařilo se uložit recept')
   }
 }
 </script>
