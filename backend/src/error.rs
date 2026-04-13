@@ -27,10 +27,22 @@ pub enum AppError {
 impl IntoResponse for AppError {
     fn into_response(self) -> Response {
         let (status, message) = match &self {
-            AppError::NotFound => (StatusCode::NOT_FOUND, self.to_string()),
-            AppError::Unauthorized => (StatusCode::UNAUTHORIZED, self.to_string()),
-            AppError::BadRequest(msg) => (StatusCode::BAD_REQUEST, msg.clone()),
-            AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            AppError::NotFound => {
+                tracing::debug!("Not found");
+                (StatusCode::NOT_FOUND, self.to_string())
+            }
+            AppError::Unauthorized => {
+                tracing::warn!("Unauthorized request");
+                (StatusCode::UNAUTHORIZED, self.to_string())
+            }
+            AppError::BadRequest(msg) => {
+                tracing::warn!("Bad request: {msg}");
+                (StatusCode::BAD_REQUEST, msg.clone())
+            }
+            AppError::Conflict(msg) => {
+                tracing::warn!("Conflict: {msg}");
+                (StatusCode::CONFLICT, msg.clone())
+            }
             AppError::Internal(err) => {
                 tracing::error!("Internal error: {err:#}");
                 (

@@ -3,6 +3,14 @@ use uuid::Uuid;
 
 use crate::models::User;
 
+pub async fn list_all(pool: &PgPool) -> Result<Vec<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>(
+        "SELECT id, name, email, password_hash, created_at FROM users ORDER BY name",
+    )
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as::<_, User>(
         "SELECT id, name, email, password_hash, created_at FROM users WHERE name = $1",
@@ -32,6 +40,14 @@ pub async fn get_dietary_restrictions(
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+pub async fn get_all_dietary_restrictions(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT restriction FROM user_dietary_restrictions ORDER BY restriction",
+    )
+    .fetch_all(pool)
+    .await
 }
 
 pub async fn add_dietary_restriction(

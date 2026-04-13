@@ -14,8 +14,8 @@ pub async fn create(
     let mut tx = pool.begin().await?;
 
     let recipe = sqlx::query_as::<_, Recipe>(
-        "INSERT INTO recipes (owner_id, title, description, servings, prep_time_min, cook_time_min, source_type, source_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+        "INSERT INTO recipes (owner_id, title, description, servings, prep_time_min, cook_time_min, emoji, source_type, source_url)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          RETURNING *",
     )
     .bind(owner_id)
@@ -24,6 +24,7 @@ pub async fn create(
     .bind(req.servings)
     .bind(req.prep_time_min)
     .bind(req.cook_time_min)
+    .bind(&req.emoji)
     .bind(&req.source_type)
     .bind(&req.source_url)
     .fetch_one(&mut *tx)
@@ -74,24 +75,41 @@ pub async fn list(
     pool: &PgPool,
     q: Option<&str>,
     tag: Option<&str>,
+    sort: &str,
     page: i64,
     per_page: i64,
 ) -> Result<(Vec<Recipe>, i64), sqlx::Error> {
     let offset = (page - 1) * per_page;
 
     let (items, total) = if let Some(tag_filter) = tag {
-        let items = sqlx::query_as::<_, Recipe>(
+        let sql = format!(
             "SELECT r.* FROM recipes r
              JOIN recipe_tags rt ON r.id = rt.recipe_id
+             {join}
              WHERE rt.tag = $1
-             ORDER BY r.updated_at DESC
+             {order}
              LIMIT $2 OFFSET $3",
-        )
-        .bind(tag_filter)
-        .bind(per_page)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+            join = if sort == "least_cooked" {
+                "LEFT JOIN (
+                    SELECT recipe_id, MAX(date) AS last_date
+                    FROM meal_plan WHERE recipe_id IS NOT NULL
+                    GROUP BY recipe_id
+                 ) mp ON mp.recipe_id = r.id"
+            } else {
+                ""
+            },
+            order = match sort {
+                "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
+                "prep_time" => "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                _ => "ORDER BY r.updated_at DESC",
+            },
+        );
+        let items = sqlx::query_as::<_, Recipe>(&sql)
+            .bind(tag_filter)
+            .bind(per_page)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM recipes r
@@ -105,18 +123,40 @@ pub async fn list(
         (items, total)
     } else if let Some(search) = q {
         let pattern = format!("%{search}%");
-        let items = sqlx::query_as::<_, Recipe>(
-            "SELECT * FROM recipes WHERE title ILIKE $1 OR description ILIKE $1
-             ORDER BY updated_at DESC LIMIT $2 OFFSET $3",
-        )
-        .bind(&pattern)
-        .bind(per_page)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+        let sql = format!(
+            "SELECT DISTINCT r.* FROM recipes r
+             {join}
+             WHERE r.title ILIKE $1 OR r.description ILIKE $1
+               OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND i.name ILIKE $1)
+               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1)
+             {order}
+             LIMIT $2 OFFSET $3",
+            join = if sort == "least_cooked" {
+                "LEFT JOIN (
+                    SELECT recipe_id, MAX(date) AS last_date
+                    FROM meal_plan WHERE recipe_id IS NOT NULL
+                    GROUP BY recipe_id
+                 ) mp ON mp.recipe_id = r.id"
+            } else {
+                ""
+            },
+            order = match sort {
+                "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
+                "prep_time" => "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                _ => "ORDER BY r.updated_at DESC",
+            },
+        );
+        let items = sqlx::query_as::<_, Recipe>(&sql)
+            .bind(&pattern)
+            .bind(per_page)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM recipes WHERE title ILIKE $1 OR description ILIKE $1",
+            "SELECT COUNT(*) FROM recipes r WHERE r.title ILIKE $1 OR r.description ILIKE $1
+               OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND i.name ILIKE $1)
+               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1)",
         )
         .bind(&pattern)
         .fetch_one(pool)
@@ -124,13 +164,31 @@ pub async fn list(
 
         (items, total)
     } else {
-        let items = sqlx::query_as::<_, Recipe>(
-            "SELECT * FROM recipes ORDER BY updated_at DESC LIMIT $1 OFFSET $2",
-        )
-        .bind(per_page)
-        .bind(offset)
-        .fetch_all(pool)
-        .await?;
+        let sql = format!(
+            "SELECT r.* FROM recipes r
+             {join}
+             {order}
+             LIMIT $1 OFFSET $2",
+            join = if sort == "least_cooked" {
+                "LEFT JOIN (
+                    SELECT recipe_id, MAX(date) AS last_date
+                    FROM meal_plan WHERE recipe_id IS NOT NULL
+                    GROUP BY recipe_id
+                 ) mp ON mp.recipe_id = r.id"
+            } else {
+                ""
+            },
+            order = match sort {
+                "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
+                "prep_time" => "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                _ => "ORDER BY r.updated_at DESC",
+            },
+        );
+        let items = sqlx::query_as::<_, Recipe>(&sql)
+            .bind(per_page)
+            .bind(offset)
+            .fetch_all(pool)
+            .await?;
 
         let total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
             .fetch_one(pool)
@@ -166,6 +224,7 @@ pub async fn update(
             servings = COALESCE($4, servings),
             prep_time_min = COALESCE($5, prep_time_min),
             cook_time_min = COALESCE($6, cook_time_min),
+            emoji = COALESCE($7, emoji),
             updated_at = now()
          WHERE id = $1",
     )
@@ -175,6 +234,7 @@ pub async fn update(
     .bind(req.servings)
     .bind(req.prep_time_min)
     .bind(req.cook_time_min)
+    .bind(&req.emoji)
     .execute(&mut *tx)
     .await?;
 

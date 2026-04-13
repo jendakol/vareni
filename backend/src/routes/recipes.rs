@@ -29,10 +29,13 @@ pub async fn list(
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
 
+    let sort = query.sort.as_deref().unwrap_or("recent");
+
     let (items, total) = db::recipes::list(
         &state.pool,
         query.q.as_deref(),
         query.tag.as_deref(),
+        sort,
         page,
         per_page,
     )

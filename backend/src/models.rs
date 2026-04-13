@@ -61,6 +61,7 @@ pub struct Recipe {
     pub cook_time_min: Option<i32>,
     pub source_type: Option<String>,
     pub source_url: Option<String>,
+    pub emoji: Option<String>,
     pub cover_image_path: Option<String>,
     pub is_public: Option<bool>,
     pub public_slug: Option<String>,
@@ -103,6 +104,7 @@ pub struct CreateRecipeRequest {
     pub servings: Option<i32>,
     pub prep_time_min: Option<i32>,
     pub cook_time_min: Option<i32>,
+    pub emoji: Option<String>,
     pub source_type: Option<String>,
     pub source_url: Option<String>,
     pub tags: Option<Vec<String>>,
@@ -131,6 +133,7 @@ pub struct UpdateRecipeRequest {
     pub servings: Option<i32>,
     pub prep_time_min: Option<i32>,
     pub cook_time_min: Option<i32>,
+    pub emoji: Option<String>,
     pub tags: Option<Vec<String>>,
     pub ingredients: Option<Vec<IngredientInput>>,
     pub steps: Option<Vec<StepInput>>,
@@ -142,6 +145,8 @@ pub struct RecipeListQuery {
     pub tag: Option<String>,
     pub page: Option<i64>,
     pub per_page: Option<i64>,
+    /// "recent" (default), "least_cooked", "prep_time"
+    pub sort: Option<String>,
 }
 
 // -- Meal Plan --
@@ -150,6 +155,7 @@ pub struct RecipeListQuery {
 pub struct MealPlanEntry {
     pub id: Uuid,
     pub user_id: Option<Uuid>,
+    pub user_name: Option<String>,
     pub date: time::Date,
     pub meal_type: Option<String>,
     pub recipe_id: Option<Uuid>,
@@ -172,6 +178,8 @@ pub struct CreateMealPlanRequest {
     pub status: Option<String>,
     pub entry_type: Option<String>,
     pub note: Option<String>,
+    /// Optional: log for a specific user. If omitted, logs for the current user.
+    pub for_user_id: Option<Uuid>,
 }
 
 #[derive(Debug, Deserialize)]

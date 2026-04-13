@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::routing::{get, post, put};
 use tower_http::services::{ServeDir, ServeFile};
+use tower_http::trace::TraceLayer;
 
 pub mod ai;
 pub mod auth;
@@ -24,6 +25,7 @@ pub fn create_router(state: AppState) -> Router {
         // Auth
         .route("/auth/login", post(routes::auth::login))
         .route("/auth/me", get(routes::auth::me))
+        .route("/auth/users", get(routes::auth::list_users))
         // Recipes
         .route(
             "/recipes",
@@ -74,5 +76,6 @@ pub fn create_router(state: AppState) -> Router {
         .fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )
+        .layer(TraceLayer::new_for_http())
         .with_state(state)
 }

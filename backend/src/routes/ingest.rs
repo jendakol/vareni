@@ -15,8 +15,7 @@ pub async fn ingest(
 ) -> AppResult<Json<ParsedRecipe>> {
     let mut source_type = None;
     let mut text = None;
-    let mut image_data = None;
-    let mut image_media_type = None;
+    let mut images: Vec<(bytes::Bytes, String)> = Vec::new();
     let mut url = None;
 
     while let Some(field) = multipart
@@ -56,8 +55,7 @@ pub async fn ingest(
                     .bytes()
                     .await
                     .map_err(|e| AppError::BadRequest(e.to_string()))?;
-                image_media_type = Some(content_type);
-                image_data = Some(data);
+                images.push((data, content_type));
             }
             _ => {}
         }
@@ -70,22 +68,28 @@ pub async fn ingest(
     let parsed = match source_type.as_str() {
         "manual" => {
             let text = text
-                .ok_or_else(|| AppError::BadRequest("text is required for manual source".into()))?;
+                .filter(|t| !t.trim().is_empty())
+                .ok_or_else(|| AppError::BadRequest("Zadejte text receptu".into()))?;
             ai::ingest::parse_text(&ai_client, &text)
                 .await
                 .map_err(AppError::Internal)?
         }
         "photo" => {
-            let data = image_data
-                .ok_or_else(|| AppError::BadRequest("image is required for photo source".into()))?;
-            let media_type = image_media_type.unwrap_or("image/jpeg".into());
-            ai::ingest::parse_image(&ai_client, &data, &media_type)
+            if images.is_empty() {
+                return Err(AppError::BadRequest("Nahrajte fotku receptu".into()));
+            }
+            let image_refs: Vec<(&[u8], &str)> = images
+                .iter()
+                .map(|(data, mt)| (data.as_ref(), mt.as_str()))
+                .collect();
+            ai::ingest::parse_images(&ai_client, &image_refs)
                 .await
                 .map_err(AppError::Internal)?
         }
         "url" => {
-            let url =
-                url.ok_or_else(|| AppError::BadRequest("url is required for url source".into()))?;
+            let url = url
+                .filter(|u| !u.trim().is_empty())
+                .ok_or_else(|| AppError::BadRequest("Zadejte URL receptu".into()))?;
             ai::ingest::parse_url(&ai_client, &reqwest::Client::new(), &url)
                 .await
                 .map_err(AppError::Internal)?
