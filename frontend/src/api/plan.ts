@@ -13,6 +13,7 @@ export interface MealPlanEntry {
   entry_type: string
   suggested_by_ai: boolean
   note: string | null
+  recipe_title: string | null
 }
 
 export function listPlan(from: string, to: string) {

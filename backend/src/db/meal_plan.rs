@@ -21,7 +21,7 @@ pub async fn create(
     sqlx::query_as::<_, MealPlanEntry>(
         "INSERT INTO meal_plan_entries (user_id, date, meal_type, recipe_id, free_text, servings, status, entry_type, note)
          VALUES ($1, $2, $3, $4, $5, $6, COALESCE($7, 'confirmed'), COALESCE($8, 'logged'), $9)
-         RETURNING *, (SELECT name FROM users WHERE id = $1) AS user_name",
+         RETURNING *, (SELECT name FROM users WHERE id = $1) AS user_name, (SELECT title FROM recipes WHERE id = $4) AS recipe_title",
     )
     .bind(user_id)
     .bind(date)
@@ -45,7 +45,7 @@ pub async fn list_by_range(
     let to_date = parse_date(to).map_err(|e| sqlx::Error::Protocol(e.to_string()))?;
 
     sqlx::query_as::<_, MealPlanEntry>(
-        "SELECT m.*, u.name AS user_name FROM meal_plan_entries m LEFT JOIN users u ON m.user_id = u.id WHERE m.date >= $1 AND m.date <= $2 ORDER BY m.date, m.meal_type",
+        "SELECT m.*, u.name AS user_name, r.title AS recipe_title FROM meal_plan_entries m LEFT JOIN users u ON m.user_id = u.id LEFT JOIN recipes r ON m.recipe_id = r.id WHERE m.date >= $1 AND m.date <= $2 ORDER BY m.date, m.meal_type",
     )
     .bind(from_date)
     .bind(to_date)
@@ -55,7 +55,7 @@ pub async fn list_by_range(
 
 pub async fn history(pool: &PgPool, days: i64) -> Result<Vec<MealPlanEntry>, sqlx::Error> {
     sqlx::query_as::<_, MealPlanEntry>(
-        "SELECT m.*, u.name AS user_name FROM meal_plan_entries m LEFT JOIN users u ON m.user_id = u.id WHERE m.date >= CURRENT_DATE - $1::integer
+        "SELECT m.*, u.name AS user_name, r.title AS recipe_title FROM meal_plan_entries m LEFT JOIN users u ON m.user_id = u.id LEFT JOIN recipes r ON m.recipe_id = r.id WHERE m.date >= CURRENT_DATE - $1::integer
          ORDER BY m.date DESC, m.meal_type",
     )
     .bind(days as i32)
@@ -84,7 +84,7 @@ pub async fn update(
             servings = COALESCE($6, servings),
             status = COALESCE($7, status),
             note = COALESCE($8, note)
-         WHERE id = $1 RETURNING *, (SELECT name FROM users WHERE id = user_id) AS user_name",
+         WHERE id = $1 RETURNING *, (SELECT name FROM users WHERE id = user_id) AS user_name, (SELECT title FROM recipes WHERE id = recipe_id) AS recipe_title",
     )
     .bind(id)
     .bind(date)
