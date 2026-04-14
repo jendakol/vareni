@@ -28,10 +28,11 @@ impl std::fmt::Debug for User {
 }
 
 #[derive(Debug, Serialize)]
-pub struct UserWithRestrictions {
+pub struct UserProfile {
     #[serde(flatten)]
     pub user: User,
     pub dietary_restrictions: Vec<String>,
+    pub food_preferences: Vec<String>,
 }
 
 // -- Auth --
@@ -166,6 +167,7 @@ pub struct MealPlanEntry {
     pub suggested_by_ai: Option<bool>,
     pub note: Option<String>,
     pub created_at: Option<OffsetDateTime>,
+    pub recipe_title: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -224,6 +226,11 @@ pub struct ShareResponse {
 #[derive(Debug, Deserialize)]
 pub struct DietaryRestrictionRequest {
     pub restriction: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct FoodPreferenceRequest {
+    pub preference: String,
 }
 
 // -- Pagination --

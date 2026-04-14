@@ -62,6 +62,10 @@ pub fn create_router(state: AppState) -> Router {
             "/settings/restrictions",
             post(routes::settings::add_restriction).delete(routes::settings::remove_restriction),
         )
+        .route(
+            "/settings/preferences",
+            post(routes::settings::add_preference).delete(routes::settings::remove_preference),
+        )
         // Public
         .route(
             "/public/recipes/{slug}",

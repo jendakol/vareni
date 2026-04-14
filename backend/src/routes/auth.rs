@@ -5,7 +5,7 @@ use crate::AppState;
 use crate::auth::{AuthUser, encode_jwt};
 use crate::db;
 use crate::error::{AppError, AppResult};
-use crate::models::{LoginRequest, LoginResponse, User, UserWithRestrictions};
+use crate::models::{LoginRequest, LoginResponse, User, UserProfile};
 
 pub async fn login(
     State(state): State<AppState>,
@@ -31,19 +31,18 @@ pub async fn login(
     Ok(Json(LoginResponse { token, user }))
 }
 
-pub async fn me(
-    State(state): State<AppState>,
-    auth: AuthUser,
-) -> AppResult<Json<UserWithRestrictions>> {
+pub async fn me(State(state): State<AppState>, auth: AuthUser) -> AppResult<Json<UserProfile>> {
     let user = db::users::find_by_id(&state.pool, auth.user_id)
         .await?
         .ok_or(AppError::NotFound)?;
 
     let restrictions = db::users::get_dietary_restrictions(&state.pool, auth.user_id).await?;
+    let preferences = db::users::get_food_preferences(&state.pool, auth.user_id).await?;
 
-    Ok(Json(UserWithRestrictions {
+    Ok(Json(UserProfile {
         user,
         dietary_restrictions: restrictions,
+        food_preferences: preferences,
     }))
 }
 

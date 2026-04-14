@@ -37,10 +37,16 @@ pub async fn suggest(
     } else {
         db::users::get_all_dietary_restrictions(&state.pool).await?
     };
+    let preferences = if body.planning_for == "me" {
+        db::users::get_food_preferences(&state.pool, auth.user_id).await?
+    } else {
+        db::users::get_all_food_preferences(&state.pool).await?
+    };
     let (recipes, _) = db::recipes::list(&state.pool, None, None, "recent", 1, 1000).await?;
 
     let history_json = serde_json::to_string(&history).unwrap_or_default();
     let restrictions_json = serde_json::to_string(&restrictions).unwrap_or_default();
+    let preferences_json = serde_json::to_string(&preferences).unwrap_or_default();
     let recipes_json = serde_json::to_string(&recipes).unwrap_or_default();
 
     let ai_client = AnthropicClient::new(&state.config.anthropic_api_key);
@@ -48,6 +54,7 @@ pub async fn suggest(
         &ai_client,
         &history_json,
         &restrictions_json,
+        &preferences_json,
         &recipes_json,
         &body.prompt,
     )

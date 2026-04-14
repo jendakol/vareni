@@ -79,3 +79,55 @@ pub async fn remove_dietary_restriction(
     .await?;
     Ok(result.rows_affected() > 0)
 }
+
+// -- Food preferences --
+
+pub async fn get_food_preferences(
+    pool: &PgPool,
+    user_id: Uuid,
+) -> Result<Vec<String>, sqlx::Error> {
+    let rows = sqlx::query_scalar::<_, String>(
+        "SELECT preference FROM user_food_preferences WHERE user_id = $1 ORDER BY preference",
+    )
+    .bind(user_id)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn get_all_food_preferences(pool: &PgPool) -> Result<Vec<String>, sqlx::Error> {
+    sqlx::query_scalar::<_, String>(
+        "SELECT DISTINCT preference FROM user_food_preferences ORDER BY preference",
+    )
+    .fetch_all(pool)
+    .await
+}
+
+pub async fn add_food_preference(
+    pool: &PgPool,
+    user_id: Uuid,
+    preference: &str,
+) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO user_food_preferences (user_id, preference) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+    )
+    .bind(user_id)
+    .bind(preference)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn remove_food_preference(
+    pool: &PgPool,
+    user_id: Uuid,
+    preference: &str,
+) -> Result<bool, sqlx::Error> {
+    let result =
+        sqlx::query("DELETE FROM user_food_preferences WHERE user_id = $1 AND preference = $2")
+            .bind(user_id)
+            .bind(preference)
+            .execute(pool)
+            .await?;
+    Ok(result.rows_affected() > 0)
+}

@@ -5,6 +5,7 @@ export interface User {
   name: string
   email: string
   dietary_restrictions: string[]
+  food_preferences: string[]
 }
 
 export interface LoginResponse {
