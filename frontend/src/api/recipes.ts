@@ -15,6 +15,11 @@ export interface Recipe {
   steps?: Step[]
   is_public: boolean
   public_slug: string | null
+  status: string
+  discovery_score: number | null
+  discovered_at: string | null
+  scored_at: string | null
+  canonical_name: string | null
 }
 
 export interface Ingredient {
@@ -38,13 +43,21 @@ export interface Paginated<T> {
   per_page: number
 }
 
-export function listRecipes(params: { q?: string; tag?: string; page?: number; sort?: string }) {
+export function listRecipes(params: { q?: string; tag?: string; page?: number; sort?: string; status?: string } = {}) {
   const search = new URLSearchParams()
   if (params.q) search.set('q', params.q)
   if (params.tag) search.set('tag', params.tag)
   if (params.page) search.set('page', String(params.page))
   if (params.sort) search.set('sort', params.sort)
+  if (params.status) search.set('status', params.status)
   return apiFetch<Paginated<Recipe>>(`/recipes?${search}`)
+}
+
+export function updateRecipeStatus(id: string, status: string): Promise<Recipe> {
+  return apiFetch(`/recipes/${id}/status`, {
+    method: 'PATCH',
+    body: JSON.stringify({ status }),
+  })
 }
 
 export function getRecipe(id: string) {

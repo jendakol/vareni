@@ -13,6 +13,9 @@ pub struct Config {
     pub vapid_public_key: String,
     pub vapid_private_key: String,
     pub vapid_contact: String,
+    // Discovery
+    pub embedding_model_dir: Option<String>,
+    pub discovery_enabled: bool,
 }
 
 impl Config {
@@ -41,6 +44,11 @@ impl Config {
             vapid_private_key: env::var("VAPID_PRIVATE_KEY").unwrap_or_default(),
             vapid_contact: env::var("VAPID_CONTACT")
                 .unwrap_or_else(|_| "mailto:you@example.com".into()),
+            embedding_model_dir: env::var("EMBEDDING_MODEL_DIR").ok(),
+            discovery_enabled: env::var("DISCOVERY_ENABLED")
+                .unwrap_or_else(|_| "true".into())
+                .parse()
+                .unwrap_or(true),
         })
     }
 }

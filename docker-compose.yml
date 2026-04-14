@@ -10,5 +10,13 @@ services:
     volumes:
       - pgdata:/var/lib/postgresql/data
 
+# To enable recipe discovery, download the all-MiniLM-L6-v2 model
+# and mount it as a volume for the backend:
+#  backend:
+#    volumes:
+#      - ./models/all-MiniLM-L6-v2:/models/all-MiniLM-L6-v2:ro
+#    environment:
+#      - EMBEDDING_MODEL_DIR=/models/all-MiniLM-L6-v2
+
 volumes:
   pgdata:

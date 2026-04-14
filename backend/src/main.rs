@@ -49,10 +49,44 @@ async fn main() -> anyhow::Result<()> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
+    // Load ONNX model on a blocking thread to avoid async runtime deadlock (spec section 8.3)
+    let embedding = if config.discovery_enabled {
+        match &config.embedding_model_dir {
+            Some(dir) => {
+                let dir_owned = dir.clone();
+                match tokio::task::spawn_blocking(move || {
+                    cooking_app::embedding::EmbeddingService::new(&dir_owned)
+                })
+                .await
+                .expect("blocking task panicked")
+                {
+                    Ok(svc) => {
+                        tracing::info!(model_dir = %dir, "ONNX embedding model loaded — discovery enabled");
+                        Some(Arc::new(svc))
+                    }
+                    Err(e) => {
+                        tracing::warn!(
+                            "Failed to load embedding model from {dir}: {e} — discovery disabled"
+                        );
+                        None
+                    }
+                }
+            }
+            None => {
+                tracing::info!("EMBEDDING_MODEL_DIR not set — discovery disabled");
+                None
+            }
+        }
+    } else {
+        tracing::info!("Discovery disabled via DISCOVERY_ENABLED=false");
+        None
+    };
+
     let state = AppState {
         pool,
         config: Arc::new(config),
         http_client,
+        embedding,
     };
 
     let app = create_router(state);

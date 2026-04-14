@@ -1,5 +1,6 @@
 pub mod auth;
 pub mod chat;
+pub mod discover;
 pub mod ingest;
 pub mod plan;
 pub mod public;

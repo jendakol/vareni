@@ -9,3 +9,6 @@
 .claude/
 frontend/tsconfig.tsbuildinfo
 .idea/
+/models/
+tools/embedding-bench/models
+tools/embedding-bench/target/

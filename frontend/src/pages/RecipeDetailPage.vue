@@ -3,9 +3,17 @@
     <!-- View mode -->
     <div v-if="!editing">
       <div class="flex items-start justify-between mb-4">
-        <h1 class="text-2xl font-bold text-stone-800">
-          <span v-if="recipe.emoji" class="mr-1">{{ recipe.emoji }}</span>{{ recipe.title }}
-        </h1>
+        <div class="flex items-center gap-2 flex-wrap">
+          <h1 class="text-2xl font-bold text-stone-800">
+            <span v-if="recipe.emoji" class="mr-1">{{ recipe.emoji }}</span>{{ recipe.title }}
+          </h1>
+          <span v-if="recipe.status === 'discovered'" class="text-xs bg-green-100 text-green-700 rounded-full px-2 py-1">
+            Objevený ({{ Math.round((recipe.discovery_score || 0) * 100) }}%)
+          </span>
+          <span v-if="recipe.status === 'tested'" class="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-1">
+            Vyzkoušeno
+          </span>
+        </div>
         <div class="flex items-center gap-1">
           <button @click="editing = true" title="Upravit"
             class="p-2 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100">
@@ -22,11 +30,18 @@
         </div>
       </div>
 
-      <button @click="startCooking"
-        class="mb-4 px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
-        <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-        Vařit
-      </button>
+      <div class="flex items-center gap-2 mb-4 flex-wrap">
+        <button @click="startCooking"
+          class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+          Vařit
+        </button>
+        <button v-if="recipe.status === 'saved'" @click="markTested"
+          class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium inline-flex items-center gap-2">
+          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+          Vyzkoušeno
+        </button>
+      </div>
 
       <p v-if="recipe.description" class="text-stone-600 mb-4">{{ recipe.description }}</p>
 
@@ -53,12 +68,12 @@
       <TagChips v-if="recipe.tags?.length" :tags="recipe.tags" class="mb-6" />
 
       <section class="mb-8">
-        <h2 class="text-lg font-semibold text-stone-700 mb-3">Ingredience</h2>
+        <h2 class="text-xl font-bold text-stone-800 mb-3">Ingredience</h2>
         <IngredientList :ingredients="recipe.ingredients || []" />
       </section>
 
       <section class="mb-8">
-        <h2 class="text-lg font-semibold text-stone-700 mb-3">Postup</h2>
+        <h2 class="text-xl font-bold text-stone-800 mb-3">Postup</h2>
         <ol class="space-y-4">
           <li v-for="step in recipe.steps" :key="step.step_order" class="flex gap-3">
             <span class="flex-shrink-0 w-7 h-7 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-medium">
@@ -100,6 +115,7 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import * as api from '../api/recipes'
+import { updateRecipeStatus } from '../api/recipes'
 import type { Recipe } from '../api/recipes'
 import TagChips from '../components/TagChips.vue'
 import IngredientList from '../components/IngredientList.vue'
@@ -159,6 +175,17 @@ async function loadRecipe() {
 }
 
 function startCooking() { cooking.value = true }
+
+async function markTested() {
+  if (!recipe.value) return
+  try {
+    await updateRecipeStatus(recipe.value.id, 'tested')
+    recipe.value.status = 'tested'
+    toast.success('Recept označen jako vyzkoušený')
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se změnit stav')
+  }
+}
 
 async function handleShare() {
   if (!recipe.value) return

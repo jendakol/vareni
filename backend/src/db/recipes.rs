@@ -1,3 +1,4 @@
+use pgvector::Vector;
 use sqlx::PgPool;
 use uuid::Uuid;
 
@@ -6,6 +7,18 @@ use crate::models::{
     StepInput, UpdateRecipeRequest,
 };
 
+/// Explicit column list for Recipe queries (excludes `embedding` which is handled separately).
+const RECIPE_COLUMNS: &str = "r.id, r.owner_id, r.title, r.description, r.servings, \
+    r.prep_time_min, r.cook_time_min, r.source_type, r.source_url, r.emoji, \
+    r.cover_image_path, r.is_public, r.public_slug, r.created_at, r.updated_at, \
+    r.status, r.discovery_score, r.discovered_at, r.scored_at, r.canonical_name";
+
+/// Same columns but without the `r.` prefix (for RETURNING clauses).
+const RECIPE_RETURNING: &str = "id, owner_id, title, description, servings, \
+    prep_time_min, cook_time_min, source_type, source_url, emoji, \
+    cover_image_path, is_public, public_slug, created_at, updated_at, \
+    status, discovery_score, discovered_at, scored_at, canonical_name";
+
 pub async fn create(
     pool: &PgPool,
     owner_id: Uuid,
@@ -13,22 +26,23 @@ pub async fn create(
 ) -> Result<RecipeDetail, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    let recipe = sqlx::query_as::<_, Recipe>(
+    let sql = format!(
         "INSERT INTO recipes (owner_id, title, description, servings, prep_time_min, cook_time_min, emoji, source_type, source_url)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING *",
-    )
-    .bind(owner_id)
-    .bind(&req.title)
-    .bind(&req.description)
-    .bind(req.servings)
-    .bind(req.prep_time_min)
-    .bind(req.cook_time_min)
-    .bind(&req.emoji)
-    .bind(&req.source_type)
-    .bind(&req.source_url)
-    .fetch_one(&mut *tx)
-    .await?;
+         RETURNING {RECIPE_RETURNING}"
+    );
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+        .bind(owner_id)
+        .bind(&req.title)
+        .bind(&req.description)
+        .bind(req.servings)
+        .bind(req.prep_time_min)
+        .bind(req.cook_time_min)
+        .bind(&req.emoji)
+        .bind(&req.source_type)
+        .bind(&req.source_url)
+        .fetch_one(&mut *tx)
+        .await?;
 
     let ingredients = insert_ingredients(&mut tx, recipe.id, &req.ingredients).await?;
     let steps = insert_steps(&mut tx, recipe.id, &req.steps).await?;
@@ -50,7 +64,8 @@ pub async fn create(
 }
 
 pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<RecipeDetail>, sqlx::Error> {
-    let recipe = sqlx::query_as::<_, Recipe>("SELECT * FROM recipes WHERE id = $1")
+    let sql = format!("SELECT {RECIPE_RETURNING} FROM recipes r WHERE r.id = $1");
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
         .bind(id)
         .fetch_optional(pool)
         .await?;
@@ -78,21 +93,23 @@ pub async fn list(
     sort: &str,
     page: i64,
     per_page: i64,
+    statuses: &[&str],
 ) -> Result<(Vec<Recipe>, i64), sqlx::Error> {
     let offset = (page - 1) * per_page;
+    let statuses_vec: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
 
     let (items, total) = if let Some(tag_filter) = tag {
         let sql = format!(
-            "SELECT r.* FROM recipes r
+            "SELECT {RECIPE_COLUMNS} FROM recipes r
              JOIN recipe_tags rt ON r.id = rt.recipe_id
              {join}
-             WHERE rt.tag = $1
+             WHERE rt.tag = $1 AND r.status = ANY($4)
              {order}
              LIMIT $2 OFFSET $3",
             join = if sort == "least_cooked" {
                 "LEFT JOIN (
                     SELECT recipe_id, MAX(date) AS last_date
-                    FROM meal_plan WHERE recipe_id IS NOT NULL
+                    FROM meal_plan_entries WHERE recipe_id IS NOT NULL
                     GROUP BY recipe_id
                  ) mp ON mp.recipe_id = r.id"
             } else {
@@ -109,15 +126,17 @@ pub async fn list(
             .bind(tag_filter)
             .bind(per_page)
             .bind(offset)
+            .bind(&statuses_vec)
             .fetch_all(pool)
             .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
             "SELECT COUNT(*) FROM recipes r
              JOIN recipe_tags rt ON r.id = rt.recipe_id
-             WHERE rt.tag = $1",
+             WHERE rt.tag = $1 AND r.status = ANY($2)",
         )
         .bind(tag_filter)
+        .bind(&statuses_vec)
         .fetch_one(pool)
         .await?;
 
@@ -125,17 +144,18 @@ pub async fn list(
     } else if let Some(search) = q {
         let pattern = format!("%{search}%");
         let sql = format!(
-            "SELECT DISTINCT r.* FROM recipes r
+            "SELECT DISTINCT {RECIPE_COLUMNS} FROM recipes r
              {join}
-             WHERE r.title ILIKE $1 OR r.description ILIKE $1
+             WHERE (r.title ILIKE $1 OR r.description ILIKE $1
                OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND i.name ILIKE $1)
-               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1)
+               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1))
+               AND r.status = ANY($4)
              {order}
              LIMIT $2 OFFSET $3",
             join = if sort == "least_cooked" {
                 "LEFT JOIN (
                     SELECT recipe_id, MAX(date) AS last_date
-                    FROM meal_plan WHERE recipe_id IS NOT NULL
+                    FROM meal_plan_entries WHERE recipe_id IS NOT NULL
                     GROUP BY recipe_id
                  ) mp ON mp.recipe_id = r.id"
             } else {
@@ -151,29 +171,33 @@ pub async fn list(
             .bind(&pattern)
             .bind(per_page)
             .bind(offset)
+            .bind(&statuses_vec)
             .fetch_all(pool)
             .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM recipes r WHERE r.title ILIKE $1 OR r.description ILIKE $1
+            "SELECT COUNT(*) FROM recipes r WHERE (r.title ILIKE $1 OR r.description ILIKE $1
                OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND i.name ILIKE $1)
-               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1)",
+               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1))
+               AND r.status = ANY($2)",
         )
         .bind(&pattern)
+        .bind(&statuses_vec)
         .fetch_one(pool)
         .await?;
 
         (items, total)
     } else {
         let sql = format!(
-            "SELECT r.* FROM recipes r
+            "SELECT {RECIPE_COLUMNS} FROM recipes r
              {join}
+             WHERE r.status = ANY($3)
              {order}
              LIMIT $1 OFFSET $2",
             join = if sort == "least_cooked" {
                 "LEFT JOIN (
                     SELECT recipe_id, MAX(date) AS last_date
-                    FROM meal_plan WHERE recipe_id IS NOT NULL
+                    FROM meal_plan_entries WHERE recipe_id IS NOT NULL
                     GROUP BY recipe_id
                  ) mp ON mp.recipe_id = r.id"
             } else {
@@ -189,12 +213,15 @@ pub async fn list(
         let items = sqlx::query_as::<_, Recipe>(&sql)
             .bind(per_page)
             .bind(offset)
+            .bind(&statuses_vec)
             .fetch_all(pool)
             .await?;
 
-        let total = sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes")
-            .fetch_one(pool)
-            .await?;
+        let total =
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM recipes r WHERE r.status = ANY($1)")
+                .bind(&statuses_vec)
+                .fetch_one(pool)
+                .await?;
 
         (items, total)
     };
@@ -209,8 +236,8 @@ pub async fn update(
 ) -> Result<Option<RecipeDetail>, sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    // Update recipe fields (only non-None fields)
-    let existing = sqlx::query_as::<_, Recipe>("SELECT * FROM recipes WHERE id = $1 FOR UPDATE")
+    let sql = format!("SELECT {RECIPE_RETURNING} FROM recipes r WHERE r.id = $1 FOR UPDATE");
+    let existing = sqlx::query_as::<_, Recipe>(&sql)
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
@@ -298,12 +325,13 @@ pub async fn remove_public_slug(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Err
 }
 
 pub async fn get_by_slug(pool: &PgPool, slug: &str) -> Result<Option<RecipeDetail>, sqlx::Error> {
-    let recipe = sqlx::query_as::<_, Recipe>(
-        "SELECT * FROM recipes WHERE public_slug = $1 AND is_public = true",
-    )
-    .bind(slug)
-    .fetch_optional(pool)
-    .await?;
+    let sql = format!(
+        "SELECT {RECIPE_RETURNING} FROM recipes r WHERE r.public_slug = $1 AND r.is_public = true"
+    );
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+        .bind(slug)
+        .fetch_optional(pool)
+        .await?;
 
     let Some(recipe) = recipe else {
         return Ok(None);
@@ -319,6 +347,167 @@ pub async fn get_by_slug(pool: &PgPool, slug: &str) -> Result<Option<RecipeDetai
         steps,
         tags,
     }))
+}
+
+// ── Status transitions ──
+
+/// Allowed status transitions (from -> [to]).
+fn is_valid_transition(from: &str, to: &str) -> bool {
+    matches!(
+        (from, to),
+        ("discovered", "saved")
+            | ("discovered", "rejected")
+            | ("discovered", "rejected_similar")
+            | ("saved", "tested")
+            | ("rejected", "discovered")
+            | ("rejected_similar", "discovered")
+    )
+}
+
+pub async fn update_status(
+    pool: &PgPool,
+    id: Uuid,
+    new_status: &str,
+) -> Result<Option<Recipe>, sqlx::Error> {
+    let current = sqlx::query_scalar::<_, String>("SELECT status FROM recipes WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await?;
+
+    let Some(current) = current else {
+        return Ok(None);
+    };
+
+    if !is_valid_transition(&current, new_status) {
+        return Err(sqlx::Error::Protocol(format!(
+            "Invalid status transition: {} → {}",
+            current, new_status
+        )));
+    }
+
+    let sql = format!(
+        "UPDATE recipes SET status = $2, updated_at = now()
+         WHERE id = $1
+         RETURNING {RECIPE_RETURNING}"
+    );
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+        .bind(id)
+        .bind(new_status)
+        .fetch_optional(pool)
+        .await?;
+
+    Ok(recipe)
+}
+
+// ── Embedding queries ──
+
+/// Store an embedding and canonical name for a recipe.
+pub async fn set_embedding(
+    pool: &PgPool,
+    id: Uuid,
+    embedding: &[f32],
+    canonical_name: &str,
+) -> Result<(), sqlx::Error> {
+    let vec = Vector::from(embedding.to_vec());
+    sqlx::query("UPDATE recipes SET embedding = $2, canonical_name = $3 WHERE id = $1")
+        .bind(id)
+        .bind(vec)
+        .bind(canonical_name)
+        .execute(pool)
+        .await?;
+    Ok(())
+}
+
+/// Find the N most similar recipes by embedding cosine distance.
+/// Returns (recipe_id, title, canonical_name, similarity_score).
+pub async fn find_similar(
+    pool: &PgPool,
+    embedding: &[f32],
+    statuses: &[&str],
+    limit: i32,
+) -> Result<Vec<(Uuid, String, Option<String>, f64)>, sqlx::Error> {
+    let vec = Vector::from(embedding.to_vec());
+    let statuses_vec: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+    let rows = sqlx::query_as::<_, (Uuid, String, Option<String>, f64)>(
+        "SELECT id, title, canonical_name, 1 - (embedding <=> $1) AS similarity
+         FROM recipes
+         WHERE embedding IS NOT NULL AND status = ANY($2)
+         ORDER BY embedding <=> $1
+         LIMIT $3",
+    )
+    .bind(vec)
+    .bind(&statuses_vec)
+    .bind(limit)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Insert a discovered recipe with all discovery fields.
+#[allow(clippy::too_many_arguments)]
+pub async fn create_discovered(
+    pool: &PgPool,
+    owner_id: Uuid,
+    title: &str,
+    description: Option<&str>,
+    source_url: &str,
+    canonical_name: &str,
+    discovery_score: f32,
+    embedding: &[f32],
+    servings: Option<i32>,
+    prep_time_min: Option<i32>,
+    cook_time_min: Option<i32>,
+    tags: &[String],
+    ingredients: &[IngredientInput],
+    steps: &[StepInput],
+) -> Result<Recipe, sqlx::Error> {
+    let vec = Vector::from(embedding.to_vec());
+    let mut tx = pool.begin().await?;
+
+    let sql = format!(
+        "INSERT INTO recipes (owner_id, title, description, source_type, source_url,
+                              status, canonical_name, discovery_score, embedding,
+                              servings, prep_time_min, cook_time_min,
+                              discovered_at, scored_at)
+         VALUES ($1, $2, $3, 'url', $4,
+                 'discovered', $5, $6, $7,
+                 $8, $9, $10,
+                 now(), now())
+         RETURNING {RECIPE_RETURNING}"
+    );
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+        .bind(owner_id)
+        .bind(title)
+        .bind(description)
+        .bind(source_url)
+        .bind(canonical_name)
+        .bind(discovery_score)
+        .bind(vec)
+        .bind(servings)
+        .bind(prep_time_min)
+        .bind(cook_time_min)
+        .fetch_one(&mut *tx)
+        .await?;
+
+    if !tags.is_empty() {
+        insert_tags(&mut tx, recipe.id, tags).await?;
+    }
+    if !ingredients.is_empty() {
+        insert_ingredients(&mut tx, recipe.id, ingredients).await?;
+    }
+    for step in steps {
+        sqlx::query(
+            "INSERT INTO recipe_steps (recipe_id, step_order, instruction) VALUES ($1, $2, $3)",
+        )
+        .bind(recipe.id)
+        .bind(step.step_order)
+        .bind(&step.instruction)
+        .execute(&mut *tx)
+        .await?;
+    }
+    tx.commit().await?;
+
+    Ok(recipe)
 }
 
 // ── Helpers ──
@@ -436,4 +625,28 @@ async fn get_tags(pool: &PgPool, recipe_id: Uuid) -> Result<Vec<String>, sqlx::E
         .bind(recipe_id)
         .fetch_all(pool)
         .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_status_transitions() {
+        assert!(is_valid_transition("discovered", "saved"));
+        assert!(is_valid_transition("discovered", "rejected"));
+        assert!(is_valid_transition("discovered", "rejected_similar"));
+        assert!(is_valid_transition("saved", "tested"));
+        assert!(is_valid_transition("rejected", "discovered"));
+        assert!(is_valid_transition("rejected_similar", "discovered"));
+    }
+
+    #[test]
+    fn invalid_status_transitions() {
+        assert!(!is_valid_transition("saved", "discovered"));
+        assert!(!is_valid_transition("tested", "saved"));
+        assert!(!is_valid_transition("rejected", "saved"));
+        assert!(!is_valid_transition("discovered", "tested"));
+        assert!(!is_valid_transition("saved", "rejected"));
+    }
 }

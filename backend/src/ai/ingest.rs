@@ -181,6 +181,235 @@ fn extract_instagram_caption(html: &str) -> anyhow::Result<(String, Option<Strin
     Ok((caption, author))
 }
 
+/// Parse ISO 8601 duration (e.g. "PT30M", "PT1H30M", "PT45M") to minutes as a string.
+fn parse_iso_duration(s: &str) -> Option<String> {
+    let s = s.strip_prefix("PT")?;
+    let mut total_mins: u32 = 0;
+
+    let mut num_buf = String::new();
+    for c in s.chars() {
+        if c.is_ascii_digit() {
+            num_buf.push(c);
+        } else {
+            let n: u32 = num_buf.parse().ok()?;
+            num_buf.clear();
+            match c {
+                'H' => total_mins += n * 60,
+                'M' => total_mins += n,
+                'S' => {} // ignore seconds
+                _ => return None,
+            }
+        }
+    }
+    if total_mins > 0 {
+        Some(total_mins.to_string())
+    } else {
+        None
+    }
+}
+
+/// Structured metadata extracted from JSON-LD for supplementing AI output.
+struct JsonLdMeta {
+    prep_time_min: Option<i32>,
+    cook_time_min: Option<i32>,
+    servings: Option<i32>,
+}
+
+/// Extract machine-readable metadata from JSON-LD (times, servings).
+fn extract_jsonld_metadata(document: &scraper::Html) -> Option<JsonLdMeta> {
+    let selector = scraper::Selector::parse(r#"script[type="application/ld+json"]"#).ok()?;
+
+    for element in document.select(&selector) {
+        let json_text = element.text().collect::<String>();
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_text)
+            && let Some(meta) = find_recipe_meta(&value)
+        {
+            return Some(meta);
+        }
+    }
+    None
+}
+
+fn find_recipe_meta(value: &serde_json::Value) -> Option<JsonLdMeta> {
+    match value {
+        serde_json::Value::Object(obj) => {
+            let type_field = obj.get("@type").and_then(|v| v.as_str()).unwrap_or("");
+            if type_field == "Recipe" {
+                let prep = obj
+                    .get("prepTime")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_iso_duration_mins);
+                let cook = obj
+                    .get("cookTime")
+                    .and_then(|v| v.as_str())
+                    .and_then(parse_iso_duration_mins);
+                // If no separate prep/cook, try totalTime
+                let (prep, cook) = if prep.is_none() && cook.is_none() {
+                    let total = obj
+                        .get("totalTime")
+                        .and_then(|v| v.as_str())
+                        .and_then(parse_iso_duration_mins);
+                    (total, None)
+                } else {
+                    (prep, cook)
+                };
+                let servings = obj.get("recipeYield").and_then(|v| {
+                    v.as_str()
+                        .and_then(|s| s.split_whitespace().next())
+                        .and_then(|s| s.parse::<i32>().ok())
+                        .or_else(|| v.as_i64().map(|n| n as i32))
+                        .or_else(|| {
+                            v.as_array()
+                                .and_then(|a| a.first())
+                                .and_then(|v| v.as_str())
+                                .and_then(|s| s.parse().ok())
+                        })
+                });
+                return Some(JsonLdMeta {
+                    prep_time_min: prep,
+                    cook_time_min: cook,
+                    servings,
+                });
+            }
+            if let Some(graph) = obj.get("@graph").and_then(|v| v.as_array()) {
+                for item in graph {
+                    if let Some(meta) = find_recipe_meta(item) {
+                        return Some(meta);
+                    }
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                if let Some(meta) = find_recipe_meta(item) {
+                    return Some(meta);
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
+fn parse_iso_duration_mins(s: &str) -> Option<i32> {
+    parse_iso_duration(s).and_then(|s| s.parse().ok())
+}
+
+/// Extract recipe data from JSON-LD structured data (schema.org/Recipe).
+/// Many recipe sites embed this in <script type="application/ld+json">.
+fn extract_jsonld_recipe(document: &scraper::Html) -> Option<String> {
+    let selector = scraper::Selector::parse(r#"script[type="application/ld+json"]"#).ok()?;
+
+    for element in document.select(&selector) {
+        let json_text = element.text().collect::<String>();
+        // Try parsing as a single object or an array
+        if let Ok(value) = serde_json::from_str::<serde_json::Value>(&json_text)
+            && let Some(recipe_text) = extract_recipe_from_jsonld(&value)
+        {
+            tracing::debug!("Found JSON-LD Recipe schema ({} chars)", recipe_text.len());
+            return Some(recipe_text);
+        }
+    }
+    None
+}
+
+fn extract_recipe_from_jsonld(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(obj) => {
+            let type_field = obj.get("@type").and_then(|v| v.as_str()).unwrap_or("");
+            if type_field == "Recipe" {
+                // Convert the structured data to readable text for the AI
+                let mut parts = Vec::new();
+
+                if let Some(name) = obj.get("name").and_then(|v| v.as_str()) {
+                    parts.push(format!("Název: {name}"));
+                }
+                if let Some(desc) = obj.get("description").and_then(|v| v.as_str()) {
+                    parts.push(format!("Popis: {desc}"));
+                }
+                if let Some(prep) = obj.get("prepTime").and_then(|v| v.as_str()) {
+                    let mins = parse_iso_duration(prep);
+                    parts.push(format!(
+                        "Příprava: {} minut",
+                        mins.unwrap_or_else(|| prep.to_string())
+                    ));
+                }
+                if let Some(cook) = obj.get("cookTime").and_then(|v| v.as_str()) {
+                    let mins = parse_iso_duration(cook);
+                    parts.push(format!(
+                        "Vaření: {} minut",
+                        mins.unwrap_or_else(|| cook.to_string())
+                    ));
+                }
+                if let Some(total) = obj.get("totalTime").and_then(|v| v.as_str()) {
+                    let mins = parse_iso_duration(total);
+                    parts.push(format!(
+                        "Celkový čas: {} minut",
+                        mins.unwrap_or_else(|| total.to_string())
+                    ));
+                }
+                if let Some(servings) = obj.get("recipeYield").and_then(|v| {
+                    v.as_str().map(|s| s.to_string()).or_else(|| {
+                        v.as_array()
+                            .and_then(|a| a.first())
+                            .and_then(|v| v.as_str().map(|s| s.to_string()))
+                    })
+                }) {
+                    parts.push(format!("Porce: {servings}"));
+                }
+
+                if let Some(ingredients) = obj.get("recipeIngredient").and_then(|v| v.as_array()) {
+                    let ings: Vec<&str> = ingredients.iter().filter_map(|v| v.as_str()).collect();
+                    if !ings.is_empty() {
+                        parts.push(format!("Ingredience:\n{}", ings.join("\n")));
+                    }
+                }
+
+                if let Some(instructions) = obj.get("recipeInstructions").and_then(|v| v.as_array())
+                {
+                    let steps: Vec<String> = instructions
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(i, v)| {
+                            v.as_str()
+                                .map(|s| s.to_string())
+                                .or_else(|| {
+                                    v.get("text")
+                                        .and_then(|t| t.as_str())
+                                        .map(|s| s.to_string())
+                                })
+                                .map(|s| format!("{}. {s}", i + 1))
+                        })
+                        .collect();
+                    if !steps.is_empty() {
+                        parts.push(format!("Postup:\n{}", steps.join("\n")));
+                    }
+                }
+
+                return Some(parts.join("\n\n"));
+            }
+
+            // Check for @graph array (some sites wrap recipes in @graph)
+            if let Some(graph) = obj.get("@graph").and_then(|v| v.as_array()) {
+                for item in graph {
+                    if let Some(text) = extract_recipe_from_jsonld(item) {
+                        return Some(text);
+                    }
+                }
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            for item in arr {
+                if let Some(text) = extract_recipe_from_jsonld(item) {
+                    return Some(text);
+                }
+            }
+        }
+        _ => {}
+    }
+    None
+}
+
 pub async fn parse_url(
     client: &AnthropicClient,
     http_client: &reqwest::Client,
@@ -216,33 +445,55 @@ pub async fn parse_url(
         return parse_text(client, &text).await;
     }
 
-    // Non-Instagram: extract readable text
-    let text = {
+    // Non-Instagram: try JSON-LD structured data first, then fall back to HTML text.
+    // Scoped to drop the scraper::Html before the async parse_text call
+    // (scraper::Html uses tendril::NonAtomic which is !Send).
+    let (text, jsonld_meta) = {
         let document = scraper::Html::parse_document(&html);
-        let extracted = ["article", "main", "body"]
-            .iter()
-            .find_map(|tag| {
-                let selector = scraper::Selector::parse(tag).ok()?;
-                document
-                    .select(&selector)
-                    .next()
-                    .map(|el| el.text().collect::<Vec<_>>().join(" "))
-            })
-            .unwrap_or_else(|| document.root_element().text().collect::<Vec<_>>().join(" "));
-
-        // Truncate to ~8000 chars to stay within token limits
-        if extracted.len() > 8000 {
-            let mut end = 8000;
-            while !extracted.is_char_boundary(end) {
-                end -= 1;
-            }
-            extracted[..end].to_string()
-        } else {
-            extracted
-        }
+        let meta = extract_jsonld_metadata(&document);
+        let text = extract_jsonld_recipe(&document).unwrap_or_else(|| {
+            // Fallback: extract readable text from article/main/body
+            ["article", "main", "body"]
+                .iter()
+                .find_map(|tag| {
+                    let selector = scraper::Selector::parse(tag).ok()?;
+                    document
+                        .select(&selector)
+                        .next()
+                        .map(|el| el.text().collect::<Vec<_>>().join(" "))
+                })
+                .unwrap_or_else(|| document.root_element().text().collect::<Vec<_>>().join(" "))
+        });
+        (text, meta)
     };
 
-    parse_text(client, &text).await
+    // Truncate to ~8000 chars to stay within token limits
+    let text = if text.len() > 8000 {
+        let mut end = 8000;
+        while !text.is_char_boundary(end) {
+            end -= 1;
+        }
+        text[..end].to_string()
+    } else {
+        text
+    };
+
+    let mut recipe = parse_text(client, &text).await?;
+
+    // Supplement AI output with structured data from JSON-LD (more reliable than AI extraction)
+    if let Some(meta) = jsonld_meta {
+        if recipe.prep_time_min.is_none() {
+            recipe.prep_time_min = meta.prep_time_min;
+        }
+        if recipe.cook_time_min.is_none() {
+            recipe.cook_time_min = meta.cook_time_min;
+        }
+        if recipe.servings.is_none() {
+            recipe.servings = meta.servings;
+        }
+    }
+
+    Ok(recipe)
 }
 
 #[cfg(test)]
@@ -399,5 +650,117 @@ mod tests {
         assert!(caption.contains("Hähnchen"));
         assert!(caption.contains("&"));
         assert!(caption.contains("Gemüse"));
+    }
+
+    // -- parse_iso_duration --
+
+    #[test]
+    fn iso_duration_30_minutes() {
+        assert_eq!(parse_iso_duration("PT30M"), Some("30".to_string()));
+    }
+
+    #[test]
+    fn iso_duration_1h30m() {
+        assert_eq!(parse_iso_duration("PT1H30M"), Some("90".to_string()));
+    }
+
+    #[test]
+    fn iso_duration_1h() {
+        assert_eq!(parse_iso_duration("PT1H"), Some("60".to_string()));
+    }
+
+    #[test]
+    fn iso_duration_45m() {
+        assert_eq!(parse_iso_duration("PT45M"), Some("45".to_string()));
+    }
+
+    #[test]
+    fn iso_duration_2h15m() {
+        assert_eq!(parse_iso_duration("PT2H15M"), Some("135".to_string()));
+    }
+
+    #[test]
+    fn iso_duration_zero_returns_none() {
+        assert_eq!(parse_iso_duration("PT0M"), None);
+    }
+
+    #[test]
+    fn iso_duration_missing_pt_prefix() {
+        assert_eq!(parse_iso_duration("30M"), None);
+    }
+
+    #[test]
+    fn iso_duration_invalid_string() {
+        assert_eq!(parse_iso_duration("invalid"), None);
+    }
+
+    // -- extract_jsonld_recipe & extract_jsonld_metadata --
+
+    #[test]
+    fn jsonld_basic_recipe_schema() {
+        let html = r#"<html><head>
+            <script type="application/ld+json">{"@type":"Recipe","name":"Palačinky","prepTime":"PT20M","cookTime":"PT15M","recipeYield":"4 porce","recipeIngredient":["mouka","vejce","mléko"],"recipeInstructions":[{"@type":"HowToStep","text":"Smíchejte ingredience."},{"@type":"HowToStep","text":"Pečte na pánvi."}]}</script>
+        </head><body></body></html>"#;
+
+        let document = scraper::Html::parse_document(html);
+
+        let text = extract_jsonld_recipe(&document).expect("should extract recipe");
+        assert!(
+            text.contains("Název: Palačinky"),
+            "expected 'Název: Palačinky' in: {text}"
+        );
+        assert!(text.contains("mouka"), "expected 'mouka' in: {text}");
+        assert!(
+            text.contains("Smíchejte ingredience"),
+            "expected step text in: {text}"
+        );
+
+        let meta = extract_jsonld_metadata(&document).expect("should extract metadata");
+        assert_eq!(meta.prep_time_min, Some(20));
+        assert_eq!(meta.cook_time_min, Some(15));
+        assert_eq!(meta.servings, Some(4));
+    }
+
+    #[test]
+    fn jsonld_recipe_inside_graph_array() {
+        let html = r#"<html><head>
+            <script type="application/ld+json">{"@graph":[{"@type":"WebPage"},{"@type":"Recipe","name":"Guláš","prepTime":"PT30M","cookTime":"PT2H","recipeYield":"6"}]}</script>
+        </head><body></body></html>"#;
+
+        let document = scraper::Html::parse_document(html);
+
+        let text = extract_jsonld_recipe(&document).expect("should find Recipe inside @graph");
+        assert!(
+            text.contains("Název: Guláš"),
+            "expected 'Název: Guláš' in: {text}"
+        );
+
+        let meta = extract_jsonld_metadata(&document).expect("should extract metadata from @graph");
+        assert_eq!(meta.prep_time_min, Some(30));
+        assert_eq!(meta.cook_time_min, Some(120));
+        assert_eq!(meta.servings, Some(6));
+    }
+
+    #[test]
+    fn jsonld_no_recipe_schema() {
+        let html = r#"<html><head>
+            <script type="application/ld+json">{"@type":"WebPage","name":"Homepage"}</script>
+        </head><body></body></html>"#;
+
+        let document = scraper::Html::parse_document(html);
+        assert!(extract_jsonld_recipe(&document).is_none());
+        assert!(extract_jsonld_metadata(&document).is_none());
+    }
+
+    #[test]
+    fn jsonld_recipe_yield_as_number() {
+        let html = r#"<html><head>
+            <script type="application/ld+json">{"@type":"Recipe","name":"Test","recipeYield":4}</script>
+        </head><body></body></html>"#;
+
+        let document = scraper::Html::parse_document(html);
+
+        let meta = extract_jsonld_metadata(&document).expect("should extract metadata");
+        assert_eq!(meta.servings, Some(4));
     }
 }
