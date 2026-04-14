@@ -1,0 +1,98 @@
+[
+  {
+    "id": "syn-01",
+    "title": "Makarony se sýrem",
+    "description": "Klasický americký mac and cheese.",
+    "tags": ["těstoviny", "sýr"],
+    "ingredients": ["makaróny", "cheddar", "máslo", "mléko", "mouka"],
+    "_note": "EXPECTED DUPLICATE of Mac'n'cheese z Rohlíku / Mac'n'cheese superrychle"
+  },
+  {
+    "id": "syn-02",
+    "title": "Sýrové těstoviny pro děti",
+    "description": "Rychlé těstoviny se sýrovou omáčkou.",
+    "tags": ["těstoviny", "sýr", "rychlé"],
+    "ingredients": ["těstoviny", "sýr", "máslo", "mléko"],
+    "_note": "EXPECTED DUPLICATE of Mac'n'cheese variants"
+  },
+  {
+    "id": "syn-03",
+    "title": "Kuřecí paprikáš",
+    "description": "Tradiční české kuře na paprice.",
+    "tags": ["kuřecí", "česká kuchyně", "omáčka"],
+    "ingredients": ["kuře", "cibule", "paprika", "smetana", "mouka", "sůl"],
+    "_note": "EXPECTED DUPLICATE of Kuře na paprice podle Pauluse"
+  },
+  {
+    "id": "syn-04",
+    "title": "Chicken paprikash",
+    "description": "Traditional Czech chicken in paprika cream sauce.",
+    "tags": ["chicken", "Czech", "sauce"],
+    "ingredients": ["chicken", "onion", "paprika", "cream", "flour", "salt"],
+    "_note": "EXPECTED DUPLICATE of Kuře na paprice (different language!)"
+  },
+  {
+    "id": "syn-05",
+    "title": "Pečená kachna s knedlíky a zelím",
+    "description": "Klasická česká pečená kachna.",
+    "tags": ["kachna", "pečené", "česká kuchyně", "knedlíky"],
+    "ingredients": ["kachna", "sůl", "kmín", "knedlíky", "zelí"],
+    "_note": "EXPECTED NEAR-DUPLICATE of V troubě pomalu pečená kachna (same protein, different sides)"
+  },
+  {
+    "id": "syn-06",
+    "title": "Pad Thai s krevetami",
+    "description": "Thajské smažené nudle s krevetami.",
+    "tags": ["asijské", "krevety", "nudle"],
+    "ingredients": ["rýžové nudle", "krevety", "vejce", "arašídy", "limetka", "rybí omáčka", "tamarind"],
+    "_note": "EXPECTED DIFFERENT from Asijská vaječná rýže s krevetami (both Asian shrimp, different dish)"
+  },
+  {
+    "id": "syn-07",
+    "title": "Hovězí guláš s houskovými knedlíky",
+    "description": "Klasický český guláš z hovězího masa.",
+    "tags": ["hovězí", "česká kuchyně", "omáčka"],
+    "ingredients": ["hovězí krk", "cibule", "paprika", "rajčatový protlak", "kmín", "česnek", "sůl", "houskové knedlíky"],
+    "_note": "EXPECTED DIFFERENT from Hovězí na rajčatovo-worcesterové (different dish, similar protein)"
+  },
+  {
+    "id": "syn-08",
+    "title": "Svíčková na smetaně",
+    "description": "Tradiční svíčková pečeně se smetanovou omáčkou a houskovým knedlíkem.",
+    "tags": ["hovězí", "česká kuchyně", "omáčka"],
+    "ingredients": ["hovězí svíčková", "mrkev", "celer", "petržel", "cibule", "smetana", "brusinkový kompot", "houskové knedlíky"],
+    "_note": "EXPECTED DIFFERENT — unique dish, no duplicate in the set"
+  },
+  {
+    "id": "syn-09",
+    "title": "Risotto alla milanese",
+    "description": "Italské šafránové rizoto.",
+    "tags": ["rizoto", "italské", "vegetariánské"],
+    "ingredients": ["rýže arborio", "šafrán", "cibule", "bílé víno", "parmezán", "vývar", "máslo"],
+    "_note": "EXPECTED NEAR-DUPLICATE of Rizoto z paprikových lusků / Rizoto se sýrem (same base, different flavor)"
+  },
+  {
+    "id": "syn-10",
+    "title": "Řecký salát",
+    "description": "Klasický řecký salát s olivami a fetou.",
+    "tags": ["salát", "vegetariánský", "rychlý"],
+    "ingredients": ["rajčata", "okurka", "červená cibule", "olivy", "feta sýr", "olivový olej", "oregano"],
+    "_note": "EXPECTED DIFFERENT from Salát s listovým špenátem (both salads, different ingredients)"
+  },
+  {
+    "id": "syn-11",
+    "title": "Špenátový salát s fetou a rajčaty",
+    "description": "Listový salát se špenátem, balkánským sýrem a cherry rajčaty.",
+    "tags": ["salát", "vegetariánský", "zdravý"],
+    "ingredients": ["špenát", "cherry rajčata", "balkánský sýr", "olivy", "olivový olej", "ocet"],
+    "_note": "EXPECTED DUPLICATE of Salát s listovým špenátem a sýrem feta"
+  },
+  {
+    "id": "syn-12",
+    "title": "Losos na másle s citronem",
+    "description": "Losos pečený na másle s citronovou omáčkou.",
+    "tags": ["ryba", "losos", "rychlý"],
+    "ingredients": ["losos", "máslo", "citron", "česnek", "sůl", "pepř"],
+    "_note": "EXPECTED NEAR-DUPLICATE of Omáčka k rybě + Tagliatelle s kousky lososa (related but different)"
+  }
+]

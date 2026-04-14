@@ -9,7 +9,7 @@ use crate::db;
 use crate::error::{AppError, AppResult};
 use crate::models::{
     CreateRecipeRequest, Paginated, Recipe, RecipeDetail, RecipeListQuery, ShareResponse,
-    UpdateRecipeRequest,
+    StatusUpdateRequest, UpdateRecipeRequest,
 };
 
 pub async fn create(
@@ -28,8 +28,10 @@ pub async fn list(
 ) -> AppResult<Json<Paginated<Recipe>>> {
     let page = query.page.unwrap_or(1).max(1);
     let per_page = query.per_page.unwrap_or(20).clamp(1, 100);
-
     let sort = query.sort.as_deref().unwrap_or("recent");
+
+    let status_str = query.status.as_deref().unwrap_or("saved,tested");
+    let statuses: Vec<&str> = status_str.split(',').map(|s| s.trim()).collect();
 
     let (items, total) = db::recipes::list(
         &state.pool,
@@ -38,6 +40,7 @@ pub async fn list(
         sort,
         page,
         per_page,
+        &statuses,
     )
     .await?;
 
@@ -82,6 +85,36 @@ pub async fn delete(
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::NotFound)
+    }
+}
+
+pub async fn update_status(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Path(id): Path<Uuid>,
+    Json(body): Json<StatusUpdateRequest>,
+) -> AppResult<Json<Recipe>> {
+    const VALID_STATUSES: &[&str] = &[
+        "discovered",
+        "saved",
+        "tested",
+        "rejected",
+        "rejected_similar",
+    ];
+    if !VALID_STATUSES.contains(&body.status.as_str()) {
+        return Err(AppError::BadRequest(format!(
+            "Invalid status: {}",
+            body.status
+        )));
+    }
+
+    match db::recipes::update_status(&state.pool, id, &body.status).await {
+        Ok(Some(recipe)) => Ok(Json(recipe)),
+        Ok(None) => Err(AppError::NotFound),
+        Err(sqlx::Error::Protocol(msg)) if msg.contains("Invalid status transition") => {
+            Err(AppError::Conflict(msg))
+        }
+        Err(e) => Err(AppError::Sqlx(e)),
     }
 }
 

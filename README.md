@@ -52,6 +52,25 @@ cargo run
 
 Server běží na `http://localhost:8080`. Migrace se spustí automaticky při startu.
 
+### 3b. Objevování receptů (volitelné)
+
+Pro funkci discovery stáhněte ONNX embedding model a nastavte cestu:
+
+```bash
+mkdir -p models/all-MiniLM-L6-v2
+cd models/all-MiniLM-L6-v2
+wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
+cd ../..
+```
+
+Přidejte do `.env`:
+```
+EMBEDDING_MODEL_DIR=./models/all-MiniLM-L6-v2
+```
+
+Bez modelu aplikace funguje normálně, jen discovery endpoint vrací 503.
+
 ### 4. Frontend (vývoj)
 
 ```bash
@@ -110,6 +129,52 @@ Image obsahuje frontend (statické soubory), backend a migrace. Vše běží na 
 | `VAPID_PUBLIC_KEY`  | VAPID klíč pro push notifikace (volitelné) |
 | `VAPID_PRIVATE_KEY` | VAPID privátní klíč (volitelné)            |
 | `PUSH_NOTIFY_HOUR`  | Hodina pro připomínku večeře (default 20)  |
+| `EMBEDDING_MODEL_DIR` | Cesta k ONNX embedding modelu (volitelné) |
+| `DISCOVERY_ENABLED` | Povolení discovery (default `true`)        |
+
+## Objevování receptů (volitelné)
+
+Funkce discovery automaticky hledá nové recepty z kurátorských webů, hodnotí je pomocí AI a filtruje
+duplicity přes vektorové embeddingy. Vyžaduje ONNX embedding model.
+
+### Stažení modelu
+
+Potřebujete model [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
+ve formátu ONNX (~86 MB `model.onnx` + `tokenizer.json`):
+
+```bash
+mkdir -p models/all-MiniLM-L6-v2
+cd models/all-MiniLM-L6-v2
+# Stáhněte model.onnx a tokenizer.json z Hugging Face
+wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
+```
+
+### Konfigurace
+
+| Proměnná              | Popis                                                     | Default          |
+|-----------------------|-----------------------------------------------------------|------------------|
+| `EMBEDDING_MODEL_DIR` | Cesta k adresáři s `model.onnx` a `tokenizer.json`       | (není nastaveno) |
+| `DISCOVERY_ENABLED`   | Povolení discovery (`true`/`false`)                       | `true`           |
+
+### Docker — připojení modelu
+
+```bash
+docker run -d \
+  --name vareni \
+  -p 8080:8080 \
+  -v vareni-uploads:/app/uploads \
+  -v ./models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2 \
+  -e EMBEDDING_MODEL_DIR=/app/models/all-MiniLM-L6-v2 \
+  --env-file .env \
+  vareni
+```
+
+### Graceful degradace
+
+Pokud model není dostupný (chybí `EMBEDDING_MODEL_DIR` nebo soubory v něm), aplikace nastartuje
+normálně — endpoint `POST /api/discover` vrací `503 Service Unavailable`. Všechny ostatní funkce
+(recepty, plán, log, chat) fungují bez omezení.
 
 ## Licence
 

@@ -1,0 +1,92 @@
+[
+  {
+    "id": "web-01",
+    "title": "Krémové těstoviny s kuřecím masem a parmazánem",
+    "description": "Jemná smetanová omáčka s kuřecím masem, tymiánem a parmazánem připravená za 30 minut.",
+    "tags": ["těstoviny", "kuřecí", "smetana", "rychlá večeře", "omáčka", "parmazán"],
+    "ingredients": ["těstoviny", "kuřecí prsa", "rostlinný olej", "jarní cibulka", "mrkev", "tymián", "suché bílé víno", "máslo", "smetana ke šlehání", "strouhaný parmazán", "sůl", "pepř"],
+    "_note": "NEAR-DUPLICATE of 'Kuřecí kousky s těstovinami a smetanovo-sýrovou omáčkou' and 'Orzo s kuřecím masem na smetaně'",
+    "_source": "fresh.iprima.cz"
+  },
+  {
+    "id": "web-02",
+    "title": "Grilovaný hermelín zabalený v šunce s pikantními fazolemi",
+    "description": "Rozteklý hermelín zabalený v šunce s pikantní fazolovou směsí.",
+    "tags": ["hermelín", "šunka", "fazole", "grilované", "sýr"],
+    "ingredients": ["rostlinný olej", "cibule", "česnek", "chilli paprička", "oregano", "rajčata", "sůl", "pepř", "červené fazole", "jarní cibulka", "brusinkový kompot", "hermelín", "tyrolská šunka"],
+    "_note": "NEAR-DUPLICATE of 'Grilovaný hermelín v troubě' (same main ingredient, different preparation)",
+    "_source": "fresh.iprima.cz"
+  },
+  {
+    "id": "web-03",
+    "title": "Zapečené lasagne s mletým masem a mangoldem",
+    "description": "Italské lasagne s vrstvami mletého masa, rajčat, bešamelu a mangoldu, zapečené s mozzarelou.",
+    "tags": ["maso", "italská kuchyně", "lasagne", "zapékané"],
+    "ingredients": ["cibule", "česnek", "olivový olej", "mleté maso", "rajčata", "tymián", "sůl", "pepř", "máslo", "mouka", "mléko", "mangold", "lasagne", "mozzarella"],
+    "_note": "DIFFERENT — no lasagne in existing recipes",
+    "_source": "fresh.iprima.cz"
+  },
+  {
+    "id": "web-04",
+    "title": "Smažená ryba s kurkumou a koprem",
+    "description": "Bělomasá ryba marinovaná v kurkumě a kari, podávaná s rýžovými nudlemi a zeleninou.",
+    "tags": ["ryba", "asijské", "hlavní jídla"],
+    "ingredients": ["filet z tresky", "jarní cibulka", "česnek", "kurkuma", "kari koření", "bílý jogurt", "rybí omáčka", "třtinový cukr", "rostlinný olej", "kopr", "rybí vývar", "limetka", "zelené fazolky", "rýžové nudle", "červená chilli paprička"],
+    "_note": "DIFFERENT from Kapr and Tagliatelle s lososem (different fish, different style)",
+    "_source": "fresh.iprima.cz"
+  },
+  {
+    "id": "web-05",
+    "title": "Srbské rizoto",
+    "description": "Srbské rizoto s mletým masem, zeleninou a rýží.",
+    "tags": ["rizoto", "maso", "hlavní jídla"],
+    "ingredients": ["olivový olej", "cibule", "česnek", "mleté maso", "červená paprika", "cherry rajčata", "pálivá paprička", "mletá pálivá paprika", "uzená paprika", "rajčatový protlak", "oregano", "tymián", "sůl", "mražený hrášek", "hovězí vývar", "dlouhozrnná rýže", "eidam"],
+    "_note": "NEAR-DUPLICATE of 'Rizoto se sýrem a brokolicí' and 'Rizoto z paprikových lusků' (same base concept, very different flavor)",
+    "_source": "kuchynelidlu.cz"
+  },
+  {
+    "id": "web-06",
+    "title": "Zeleninové lasagne",
+    "description": "Vegetariánské lasagne se zeleninou, domácím bešamelem a parmezánem.",
+    "tags": ["italská kuchyně", "vegetariánské", "hlavní jídla"],
+    "ingredients": ["vejce", "hladká mouka", "máslo", "mléko", "muškátový oříšek", "sůl", "cuketa", "zelený chřest", "mražený hrášek", "žampiony", "pepř", "rajčata", "listový špenát", "zeleninový vývar", "parmezán", "čerstvá bazalka"],
+    "_note": "DIFFERENT — vegetarian lasagne, no match in existing",
+    "_source": "kuchynelidlu.cz"
+  },
+  {
+    "id": "web-07",
+    "title": "Pečená pražma s medem a sezamem",
+    "description": "Ryba s netradiční medovo-sezamovou krustou.",
+    "tags": ["ryba"],
+    "ingredients": ["mrkev", "sůl", "olivový olej", "černý pepř", "pálivá paprička", "česnek", "sezam", "med", "rozmarýn", "citron", "máslo", "pražma", "zakysaná smetana"],
+    "_note": "DIFFERENT from Kapr (different fish, different preparation)",
+    "_source": "kuchynelidlu.cz"
+  },
+  {
+    "id": "web-08",
+    "title": "Kuře ve sladkokyselé omáčce",
+    "description": "Zdravější varianta oblíbeného asijského pokrmu s kuřecím masem.",
+    "tags": ["kuřecí", "asijské", "sladkokyselé", "omáčka", "rychlé"],
+    "ingredients": ["kuřecí prsa", "sójová omáčka", "česnek", "zázvor", "vejce", "kukuřičný škrob", "olej", "červená paprika", "zelená paprika", "cibule", "ananas", "sůl", "pepř", "ananasová šťáva", "rýžový ocet", "kečup", "třtinový cukr", "vařená rýže"],
+    "_note": "DIFFERENT from 'Jednoduché kuře na paprice' (both chicken, completely different cuisine)",
+    "_source": "receptyodanicky.cz"
+  },
+  {
+    "id": "web-09",
+    "title": "Krémová květáková polévka",
+    "description": "Hustá, krémová květáková polévka.",
+    "tags": ["polévka", "rychlé", "vegetariánské", "zdravé"],
+    "ingredients": ["květák", "cibule", "brambory", "máslo", "olivový olej", "kmín", "pepř", "česnek", "zeleninový vývar", "bobkový list", "muškátový oříšek", "smetana ke šlehání", "sůl", "krutony"],
+    "_note": "NEAR-DUPLICATE of 'Dýňová polévka na sladko' (both cream soups, different main vegetable)",
+    "_source": "receptyodanicky.cz"
+  },
+  {
+    "id": "web-10",
+    "title": "Pečené plněné brambory",
+    "description": "Brambory plněné kuřecí směsí s rajčaty a zapečené se sýrem.",
+    "tags": ["hlavní chod", "kuřecí", "brambory"],
+    "ingredients": ["brambory", "kuřecí prsa", "olivový olej", "cibule", "zelená paprika", "rajčata", "rajčatový protlak", "kuřecí vývar", "uzená paprika", "provensálské koření", "chilli vločky", "máslo", "strouhaný sýr", "sůl", "pepř"],
+    "_note": "NEAR-DUPLICATE of 'Francouzské brambory' (both baked potato dishes, different filling)",
+    "_source": "receptyodanicky.cz"
+  }
+]

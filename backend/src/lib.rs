@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use axum::Router;
-use axum::routing::{get, post, put};
+use axum::routing::{get, patch, post, put};
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
@@ -9,16 +9,19 @@ pub mod ai;
 pub mod auth;
 pub mod config;
 pub mod db;
+pub mod embedding;
 pub mod error;
 pub mod models;
 pub mod push_notifier;
 pub mod routes;
+pub mod scraper;
 
 #[derive(Clone)]
 pub struct AppState {
     pub pool: sqlx::PgPool,
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
+    pub embedding: Option<Arc<embedding::EmbeddingService>>,
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -39,9 +42,15 @@ pub fn create_router(state: AppState) -> Router {
                 .delete(routes::recipes::delete),
         )
         .route(
+            "/recipes/{id}/status",
+            patch(routes::recipes::update_status),
+        )
+        .route(
             "/recipes/{id}/share",
             post(routes::recipes::share).delete(routes::recipes::unshare),
         )
+        // Discovery
+        .route("/discover", post(routes::discover::discover))
         // Ingestion
         .route("/ingest", post(routes::ingest::ingest))
         // Chat

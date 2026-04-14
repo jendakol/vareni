@@ -80,6 +80,8 @@ impl TestContext {
             vapid_public_key: String::new(),
             vapid_private_key: String::new(),
             vapid_contact: "mailto:test@test.com".into(),
+            embedding_model_dir: None,
+            discovery_enabled: false,
         };
 
         let user1_token =
@@ -93,6 +95,7 @@ impl TestContext {
             pool: pool.clone(),
             config: Arc::new(config),
             http_client: reqwest::Client::new(),
+            embedding: None, // Discovery disabled in tests
         };
         let router = cooking_app::create_router(state);
 

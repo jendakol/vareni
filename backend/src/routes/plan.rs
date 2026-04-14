@@ -42,7 +42,16 @@ pub async fn suggest(
     } else {
         db::users::get_all_food_preferences(&state.pool).await?
     };
-    let (recipes, _) = db::recipes::list(&state.pool, None, None, "recent", 1, 1000).await?;
+    let (recipes, _) = db::recipes::list(
+        &state.pool,
+        None,
+        None,
+        "recent",
+        1,
+        1000,
+        &["saved", "tested"],
+    )
+    .await?;
 
     let history_json = serde_json::to_string(&history).unwrap_or_default();
     let restrictions_json = serde_json::to_string(&restrictions).unwrap_or_default();

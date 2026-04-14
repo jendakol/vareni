@@ -68,6 +68,15 @@ pub struct Recipe {
     pub public_slug: Option<String>,
     pub created_at: Option<OffsetDateTime>,
     pub updated_at: Option<OffsetDateTime>,
+    // Discovery fields
+    pub status: String,
+    #[sqlx(skip)]
+    #[serde(skip_serializing)]
+    pub embedding: Option<()>, // pgvector handled separately, not in SELECT *
+    pub discovery_score: Option<f32>,
+    pub discovered_at: Option<OffsetDateTime>,
+    pub scored_at: Option<OffsetDateTime>,
+    pub canonical_name: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -148,6 +157,9 @@ pub struct RecipeListQuery {
     pub per_page: Option<i64>,
     /// "recent" (default), "least_cooked", "prep_time"
     pub sort: Option<String>,
+    /// Filter by status: "saved", "tested", "discovered", "rejected", "rejected_similar"
+    /// Comma-separated for multiple. Default: "saved,tested"
+    pub status: Option<String>,
 }
 
 // -- Meal Plan --
@@ -241,4 +253,40 @@ pub struct Paginated<T: Serialize> {
     pub total: i64,
     pub page: i64,
     pub per_page: i64,
+}
+
+// -- Discovery --
+
+#[derive(Debug, Deserialize)]
+pub struct DiscoverRequest {
+    pub prompt: Option<String>,
+    pub count: Option<usize>,
+    pub planning_for: Option<String>, // "both" (default) or "me"
+}
+
+#[derive(Debug, Serialize)]
+pub struct DiscoverResponse {
+    pub discovered: Vec<Recipe>,
+    pub skipped: SkippedCounts,
+    pub errors: Vec<SiteError>,
+}
+
+#[derive(Debug, Serialize, Default)]
+pub struct SkippedCounts {
+    pub duplicate: usize,
+    pub restricted: usize,
+    pub low_score: usize,
+    pub similar_to_rejected: usize,
+    pub failed: usize,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SiteError {
+    pub site: String,
+    pub error: String,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct StatusUpdateRequest {
+    pub status: String,
 }

@@ -60,10 +60,9 @@ pub async fn suggest(
 
     let response = client.complete(PLAN_MODEL, &system, messages, 4096).await?;
     let json_str = extract_json_array(&response);
-    let suggestions: Vec<SuggestedEntry> = serde_json::from_str(json_str)
-        .map_err(|e| {
-            tracing::error!("Failed to parse plan AI response: {e}\nRaw response: {response}");
-            e
-        })?;
+    let suggestions: Vec<SuggestedEntry> = serde_json::from_str(json_str).map_err(|e| {
+        tracing::error!("Failed to parse plan AI response: {e}\nRaw response: {response}");
+        e
+    })?;
     Ok(suggestions)
 }

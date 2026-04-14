@@ -10,7 +10,7 @@ export const useRecipeStore = defineStore('recipes', () => {
   const loading = ref(false)
   const error = ref<string | null>(null)
 
-  async function fetch(params: { q?: string; tag?: string; page?: number; sort?: string } = {}) {
+  async function fetch(params: { q?: string; tag?: string; page?: number; sort?: string; status?: string } = {}) {
     loading.value = true
     error.value = null
     try {
