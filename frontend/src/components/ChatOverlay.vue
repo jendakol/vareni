@@ -82,17 +82,20 @@ async function send() {
     const decoder = new TextDecoder()
     let toolJson = ''
     let inToolUse = false
+    let buffer = ''
 
     while (reader) {
       const { done, value } = await reader.read()
       if (done) break
 
-      const chunk = decoder.decode(value, { stream: true })
-      const lines = chunk.split('\n')
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      // Keep the last (potentially incomplete) line in the buffer
+      buffer = lines.pop() || ''
 
       for (const line of lines) {
         if (!line.startsWith('data: ')) continue
-        const data = line.slice(6)
+        const data = line.slice(6).trim()
         if (data === '[DONE]') continue
 
         try {
@@ -102,7 +105,7 @@ async function send() {
             inToolUse = true
             toolJson = ''
           } else if (event.type === 'content_block_delta') {
-            if (inToolUse && event.delta?.partial_json) {
+            if (inToolUse && event.delta?.partial_json != null) {
               toolJson += event.delta.partial_json
             } else if (event.delta?.text) {
               streamText.value += event.delta.text
@@ -112,7 +115,9 @@ async function send() {
             try {
               pendingUpdate.value = JSON.parse(toolJson)
               hasUpdates.value = true
-            } catch { /* ignore parse errors */ }
+            } catch (parseErr) {
+              console.warn('Failed to parse tool JSON:', toolJson, parseErr)
+            }
           }
         } catch { /* ignore non-JSON lines */ }
       }
@@ -120,6 +125,11 @@ async function send() {
 
     if (streamText.value) {
       messages.value.push({ role: 'assistant', text: streamText.value })
+    }
+
+    // Auto-save when the AI used the update tool
+    if (hasUpdates.value) {
+      await saveChanges()
     }
   } catch (e: any) {
     messages.value.push({ role: 'assistant', text: `Chyba: ${e.message}` })
