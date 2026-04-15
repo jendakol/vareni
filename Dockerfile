@@ -8,7 +8,14 @@ RUN npm run build
 # Output: /app/frontend/dist/
 
 # ── Stage 2: Build backend ───────────────────────────────────────
-FROM rust:1.90-bookworm AS backend-build
+# Trixie (Debian 13) required: ort's ONNX Runtime binaries need glibc ≥ 2.38
+# (Bookworm ships 2.36, missing __isoc23_strto* symbols)
+FROM debian:trixie AS backend-build
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    curl build-essential pkg-config libssl-dev ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh -s -- -y --default-toolchain 1.90.0
+ENV PATH="/root/.cargo/bin:${PATH}"
 WORKDIR /app/backend
 COPY backend/Cargo.toml backend/Cargo.lock ./
 # Cache dependencies layer
@@ -19,7 +26,7 @@ ENV SQLX_OFFLINE=true
 RUN cargo build --release
 
 # ── Stage 3: Runtime ─────────────────────────────────────────────
-FROM debian:bookworm-slim
+FROM debian:trixie-slim
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ca-certificates \
     chromium \
