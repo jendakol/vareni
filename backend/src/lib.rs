@@ -2,11 +2,13 @@ use std::sync::Arc;
 
 use axum::Router;
 use axum::routing::{get, patch, post, put};
+use tokio::sync::Semaphore;
 use tower_http::services::{ServeDir, ServeFile};
 use tower_http::trace::TraceLayer;
 
 pub mod ai;
 pub mod auth;
+pub mod browser;
 pub mod config;
 pub mod db;
 pub mod embedding;
@@ -22,6 +24,7 @@ pub struct AppState {
     pub config: Arc<config::Config>,
     pub http_client: reqwest::Client,
     pub embedding: Option<Arc<embedding::EmbeddingService>>,
+    pub browser_semaphore: Arc<Semaphore>,
 }
 
 pub fn create_router(state: AppState) -> Router {

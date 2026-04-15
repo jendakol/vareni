@@ -134,6 +134,42 @@ pub async fn discover(
         }
     }
 
+    // Launch headless browser if any provider requires it
+    let any_needs_browser = providers.iter().any(|p| p.requires_browser());
+    let browser_guard;
+    let browser_handle;
+    let browser: Option<chromiumoxide::Browser> = if any_needs_browser {
+        match state.browser_semaphore.clone().acquire_owned().await {
+            Ok(permit) => {
+                browser_guard = Some(permit);
+                match crate::browser::launch().await {
+                    Ok((b, h)) => {
+                        browser_handle = Some(h);
+                        Some(b)
+                    }
+                    Err(e) => {
+                        tracing::warn!(error = %e, "Failed to launch browser — browser-requiring providers will be skipped");
+                        browser_handle = None;
+                        None
+                    }
+                }
+            }
+            Err(_) => {
+                tracing::warn!("Browser semaphore closed");
+                browser_guard = None;
+                browser_handle = None;
+                None
+            }
+        }
+    } else {
+        browser_guard = None;
+        browser_handle = None;
+        None
+    };
+    // Suppress unused variable warnings when browser isn't launched
+    let _ = &browser_guard;
+    let _ = &browser_handle;
+
     let mut all_urls: Vec<String> = Vec::new();
     let mut errors: Vec<SiteError> = Vec::new();
 
@@ -144,6 +180,7 @@ pub async fn discover(
 
         match scraper::fetch_recipe_urls(
             &state.http_client,
+            browser.as_ref(),
             provider.as_ref(),
             prompt,
             urls_per_site,
@@ -168,6 +205,13 @@ pub async fn discover(
         }
         // Rate limit: 500ms between sites
         tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    }
+
+    // Shuffle to mix sources — otherwise Czech reqwest sites always get priority
+    {
+        use rand::seq::SliceRandom;
+        let mut rng = rand::rng();
+        all_urls.shuffle(&mut rng);
     }
 
     // Cap total URLs to process (more than requested, to survive filtering)
@@ -208,6 +252,7 @@ pub async fn discover(
             &state,
             embedding_svc,
             &client,
+            browser.as_ref(),
             auth.user_id,
             url,
             body.prompt.as_deref(),
@@ -251,6 +296,7 @@ async fn process_candidate(
     state: &AppState,
     embedding_svc: &Arc<EmbeddingService>,
     client: &AnthropicClient,
+    browser: Option<&chromiumoxide::Browser>,
     owner_id: uuid::Uuid,
     url: &str,
     user_prompt: Option<&str>,
@@ -261,7 +307,7 @@ async fn process_candidate(
 ) -> anyhow::Result<CandidateResult> {
     // Step 1: Parse the recipe from URL (reuse existing ingestion)
     tracing::info!(url = %url, "Parsing recipe candidate");
-    let parsed = crate::ai::ingest::parse_url(client, &state.http_client, url).await?;
+    let parsed = crate::ai::ingest::parse_url(client, &state.http_client, browser, url).await?;
 
     let ingredient_names: Vec<String> = parsed.ingredients.iter().map(|i| i.name.clone()).collect();
     let tags: Vec<String> = parsed.tags.clone();

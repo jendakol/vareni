@@ -96,6 +96,7 @@ impl TestContext {
             config: Arc::new(config),
             http_client: reqwest::Client::new(),
             embedding: None, // Discovery disabled in tests
+            browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
         };
         let router = cooking_app::create_router(state);
 

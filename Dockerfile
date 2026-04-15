@@ -20,7 +20,13 @@ RUN cargo build --release
 
 # ── Stage 3: Runtime ─────────────────────────────────────────────
 FROM debian:bookworm-slim
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ca-certificates \
+    chromium \
+    fonts-liberation \
+    && rm -rf /var/lib/apt/lists/*
+
+ENV CHROME_PATH=/usr/bin/chromium
 WORKDIR /app
 COPY --from=backend-build /app/backend/target/release/cooking-app ./
 COPY --from=frontend-build /app/frontend/dist/ ./static/

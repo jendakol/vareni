@@ -413,11 +413,30 @@ fn extract_recipe_from_jsonld(value: &serde_json::Value) -> Option<String> {
 pub async fn parse_url(
     client: &AnthropicClient,
     http_client: &reqwest::Client,
+    browser: Option<&chromiumoxide::Browser>,
     url: &str,
 ) -> anyhow::Result<ParsedRecipe> {
-    let response = http_client.get(url).send().await?;
-    let final_url = response.url().to_string();
-    let html = response.text().await?;
+    let wait_condition = crate::scraper::browser_wait_condition(url);
+    let (html, final_url) = if wait_condition.is_some() {
+        if let Some(browser) = browser {
+            let wait = wait_condition.unwrap_or(crate::browser::WaitCondition::NetworkIdle);
+            let html =
+                crate::browser::fetch_html(browser, url, &wait, std::time::Duration::from_secs(30))
+                    .await?;
+            (html, url.to_string())
+        } else {
+            // No browser available -- fall back to reqwest (may fail)
+            let response = http_client.get(url).send().await?;
+            let final_url = response.url().to_string();
+            let html = response.text().await?;
+            (html, final_url)
+        }
+    } else {
+        let response = http_client.get(url).send().await?;
+        let final_url = response.url().to_string();
+        let html = response.text().await?;
+        (html, final_url)
+    };
 
     // Check final URL (after redirects) for Instagram — handles ig.me short links
     if is_instagram_url(url) || is_instagram_url(&final_url) {
