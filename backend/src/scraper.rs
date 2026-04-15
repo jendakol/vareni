@@ -6,6 +6,8 @@
 
 use scraper::{Html, Selector};
 
+use crate::browser::WaitCondition;
+
 /// A recipe provider that can list and validate recipe URLs from a specific site.
 pub trait RecipeProvider: Send + Sync {
     /// Human-readable site name (e.g. "fresh.iprima.cz").
@@ -31,6 +33,18 @@ pub trait RecipeProvider: Send + Sync {
 
     /// Is this URL a valid individual recipe page (not a listing, category, author, etc.)?
     fn is_recipe_url(&self, url: &str) -> bool;
+
+    /// Whether this provider requires a headless browser instead of plain HTTP.
+    fn requires_browser(&self) -> bool {
+        false
+    }
+
+    /// What to wait for after navigation before extracting HTML.
+    /// Only meaningful when `requires_browser()` is true.
+    /// Browser-requiring providers MUST override this with a Selector.
+    fn wait_condition(&self) -> WaitCondition {
+        WaitCondition::NetworkIdle
+    }
 }
 
 /// Provider for fresh.iprima.cz.
@@ -369,6 +383,14 @@ impl RecipeProvider for ReceptyNaKazdyDen {
         // Must be a non-empty slug, single segment (no nested paths)
         !slug.is_empty() && !slug.contains('/')
     }
+
+    fn requires_browser(&self) -> bool {
+        true
+    }
+
+    fn wait_condition(&self) -> WaitCondition {
+        WaitCondition::Selector("a[href*=\"/recept/\"]")
+    }
 }
 
 /// Provider for chefkoch.de (German).
@@ -458,6 +480,262 @@ impl RecipeProvider for FoodNetworkUk {
     }
 }
 
+/// Provider for billa.cz (Vue.js SPA, requires browser).
+pub struct BillaCz;
+
+impl RecipeProvider for BillaCz {
+    fn name(&self) -> &'static str {
+        "billa.cz"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.billa.cz"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            // Billa search needs the raw query with accents (kuřecí, not kureci)
+            Some(query) => {
+                format!(
+                    "{}/recepty?term={}",
+                    self.base_url(),
+                    urlencoding::encode(query)
+                )
+            }
+            None => format!("{}/recepty", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recepty/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        let path = url
+            .strip_prefix("https://www.billa.cz/recepty/")
+            .unwrap_or("");
+        let slug = path.trim_end_matches('/');
+        !slug.is_empty()
+            && !slug.contains('/')
+            && !slug.contains('?')
+            && !slug.starts_with("kategorie")
+    }
+
+    fn requires_browser(&self) -> bool {
+        true
+    }
+
+    fn wait_condition(&self) -> WaitCondition {
+        WaitCondition::Selector("a[href*='/recepty/']")
+    }
+}
+
+/// Provider for albert.cz (Next.js SPA, requires browser).
+pub struct AlbertCz;
+
+impl RecipeProvider for AlbertCz {
+    fn name(&self) -> &'static str {
+        "albert.cz"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.albert.cz"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            // Albert search: GraphQL-powered, needs raw query with accents
+            Some(query) => {
+                let encoded = urlencoding::encode(query);
+                format!(
+                    "{}/recepty/vyhledavani/?q={encoded}%3Arelevance&text={encoded}&sort=relevance",
+                    self.base_url(),
+                )
+            }
+            None => format!("{}/recepty", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        // Albert recipe URLs: /recepty/{slug}/r/{id}
+        "a[href*=\"/r/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        // Recipe URLs: /recepty/{slug}/r/{id}
+        let path = url
+            .strip_prefix("https://www.albert.cz/recepty/")
+            .unwrap_or("");
+        // Must contain /r/ followed by an ID
+        path.contains("/r/") && !path.starts_with("vyhledavani")
+    }
+
+    fn requires_browser(&self) -> bool {
+        true
+    }
+
+    fn wait_condition(&self) -> WaitCondition {
+        // Wait for recipe result links to render (GraphQL-powered, async)
+        WaitCondition::Selector("a[href*='/r/']")
+    }
+}
+
+/// Provider for vareni.cz (search results JS-rendered, requires browser).
+pub struct VareniCz;
+
+impl RecipeProvider for VareniCz {
+    fn name(&self) -> &'static str {
+        "vareni.cz"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.vareni.cz"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                let keywords = simplify_query(query);
+                format!(
+                    "{}/recepty/hledani/?q={}",
+                    self.base_url(),
+                    urlencoding::encode(&keywords)
+                )
+            }
+            None => format!("{}/recepty/", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recepty/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        let path = url
+            .strip_prefix("https://www.vareni.cz/recepty/")
+            .unwrap_or("");
+        let slug = path.trim_end_matches('/');
+        !slug.is_empty()
+            && !slug.contains('/')
+            && !slug.starts_with("kategorie")
+            && !slug.starts_with("hledani")
+    }
+
+    fn requires_browser(&self) -> bool {
+        true
+    }
+
+    fn wait_condition(&self) -> WaitCondition {
+        WaitCondition::Selector("a[href*='/recepty/']")
+    }
+}
+
+/// Provider for bbcgoodfood.com (search results JS-rendered, requires browser).
+pub struct BbcGoodFood;
+
+impl RecipeProvider for BbcGoodFood {
+    fn name(&self) -> &'static str {
+        "bbcgoodfood.com"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.bbcgoodfood.com"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                format!(
+                    "{}/search?q={}",
+                    self.base_url(),
+                    urlencoding::encode(query)
+                )
+            }
+            None => format!("{}/recipes", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recipes/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        let path = url
+            .strip_prefix("https://www.bbcgoodfood.com/recipes/")
+            .unwrap_or("");
+        let slug = path.trim_end_matches('/');
+        !slug.is_empty()
+            && !slug.contains('/')
+            && !slug.starts_with("collection")
+            && !slug.starts_with("category")
+    }
+
+    fn language(&self) -> &'static str {
+        "en"
+    }
+
+    fn requires_browser(&self) -> bool {
+        true
+    }
+
+    fn wait_condition(&self) -> WaitCondition {
+        WaitCondition::Selector("a[href*='/recipes/']")
+    }
+}
+
+/// Provider for budgetbytes.com (Cloudflare JS challenge, requires browser).
+pub struct BudgetBytes;
+
+impl RecipeProvider for BudgetBytes {
+    fn name(&self) -> &'static str {
+        "budgetbytes.com"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.budgetbytes.com"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                format!("{}/?s={}", self.base_url(), urlencoding::encode(query))
+            }
+            None => format!("{}/category/recipes/", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"budgetbytes.com/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        let path = url
+            .strip_prefix("https://www.budgetbytes.com/")
+            .unwrap_or("");
+        let slug = path.trim_end_matches('/');
+        !slug.is_empty()
+            && !slug.contains('/')
+            && !slug.starts_with("category")
+            && !slug.starts_with("tag")
+            && !slug.starts_with("about")
+            && !slug.starts_with("contact")
+            && !slug.starts_with("privacy")
+            && slug != "recipes"
+    }
+
+    fn language(&self) -> &'static str {
+        "en"
+    }
+
+    fn requires_browser(&self) -> bool {
+        true
+    }
+
+    fn wait_condition(&self) -> WaitCondition {
+        WaitCondition::Selector("article a")
+    }
+}
+
 /// All available recipe providers.
 pub fn providers() -> Vec<Box<dyn RecipeProvider>> {
     vec![
@@ -469,9 +747,39 @@ pub fn providers() -> Vec<Box<dyn RecipeProvider>> {
         Box::new(ReceptyCz),
         Box::new(KauflandCz),
         Box::new(ReceptyNaKazdyDen),
+        Box::new(BillaCz),
+        Box::new(AlbertCz),
+        Box::new(VareniCz),
         Box::new(Chefkoch),
         Box::new(FoodNetworkUk),
+        Box::new(BbcGoodFood),
+        // BudgetBytes excluded: Cloudflare JS challenge blocks headless Chrome
     ]
+}
+
+/// Check if a URL needs a browser and return its wait condition.
+///
+/// Uses the host portion of the URL (not a substring of the full URL) to
+/// match against provider names, avoiding false positives from path segments.
+pub fn browser_wait_condition(url: &str) -> Option<WaitCondition> {
+    let host = url
+        .split("://")
+        .nth(1)
+        .and_then(|s| s.split('/').next())
+        .unwrap_or("");
+    providers()
+        .into_iter()
+        .find(|p| {
+            p.requires_browser() && (host == p.name() || host.ends_with(&format!(".{}", p.name())))
+        })
+        .map(|p| p.wait_condition())
+}
+
+/// Check if a URL belongs to a site that requires a headless browser.
+///
+/// Derives the answer from providers -- no hardcoded domain list.
+pub fn needs_browser(url: &str) -> bool {
+    browser_wait_condition(url).is_some()
 }
 
 /// Common URL filters shared across all providers.
@@ -494,26 +802,39 @@ fn passes_common_filters(url: &str, base_url: &str) -> bool {
 /// Fetch a listing/search page and extract recipe URLs.
 pub async fn fetch_recipe_urls(
     client: &reqwest::Client,
+    browser: Option<&chromiumoxide::Browser>,
     provider: &dyn RecipeProvider,
     prompt: Option<&str>,
     max_urls: usize,
 ) -> Result<Vec<String>, String> {
     let url = provider.listing_url(prompt);
 
-    let resp = client
-        .get(&url)
-        .send()
+    let html = if provider.requires_browser() {
+        let browser = browser
+            .ok_or_else(|| format!("{}: requires browser but none available", provider.name()))?;
+        crate::browser::fetch_html(
+            browser,
+            &url,
+            &provider.wait_condition(),
+            std::time::Duration::from_secs(30),
+        )
         .await
-        .map_err(|e| format!("{}: {e}", provider.name()))?;
+        .map_err(|e| format!("{}: browser fetch failed: {e}", provider.name()))?
+    } else {
+        let resp = client
+            .get(&url)
+            .send()
+            .await
+            .map_err(|e| format!("{}: {e}", provider.name()))?;
 
-    if !resp.status().is_success() {
-        return Err(format!("{}: HTTP {}", provider.name(), resp.status()));
-    }
+        if !resp.status().is_success() {
+            return Err(format!("{}: HTTP {}", provider.name(), resp.status()));
+        }
 
-    let html = resp
-        .text()
-        .await
-        .map_err(|e| format!("{}: failed to read body: {e}", provider.name()))?;
+        resp.text()
+            .await
+            .map_err(|e| format!("{}: failed to read body: {e}", provider.name()))?
+    };
 
     let document = Html::parse_document(&html);
     let selector = Selector::parse(provider.link_selector())
@@ -1003,5 +1324,227 @@ mod tests {
     #[test]
     fn simplify_strips_najdi() {
         assert_eq!(simplify_query("najdi polévku"), "polévku");
+    }
+
+    // --- requires_browser ---
+
+    #[test]
+    fn rnakazdyden_requires_browser() {
+        assert!(ReceptyNaKazdyDen.requires_browser());
+    }
+
+    #[test]
+    fn reqwest_providers_dont_require_browser() {
+        assert!(!FreshIprima.requires_browser());
+        assert!(!KuchyneLidlu.requires_browser());
+        assert!(!TopRecepty.requires_browser());
+        assert!(!ApetitOnline.requires_browser());
+        assert!(!ReceptyCz.requires_browser());
+        assert!(!KauflandCz.requires_browser());
+        assert!(!Chefkoch.requires_browser());
+        assert!(!FoodNetworkUk.requires_browser());
+    }
+
+    // --- is_recipe_url: billa.cz ---
+
+    #[test]
+    fn billa_accepts_recipe() {
+        let p = BillaCz;
+        assert!(p.is_recipe_url("https://www.billa.cz/recepty/pikantni-kureci-stripsy"));
+    }
+
+    #[test]
+    fn billa_accepts_recipe_with_trailing_slash() {
+        let p = BillaCz;
+        assert!(p.is_recipe_url("https://www.billa.cz/recepty/bramborovy-gulas/"));
+    }
+
+    #[test]
+    fn billa_rejects_listing() {
+        let p = BillaCz;
+        assert!(!p.is_recipe_url("https://www.billa.cz/recepty"));
+    }
+
+    #[test]
+    fn billa_rejects_search() {
+        let p = BillaCz;
+        assert!(!p.is_recipe_url("https://www.billa.cz/recepty?term=kure"));
+    }
+
+    #[test]
+    fn billa_rejects_kategorie() {
+        let p = BillaCz;
+        assert!(!p.is_recipe_url("https://www.billa.cz/recepty/kategorie/hlavni-jidla"));
+    }
+
+    #[test]
+    fn billa_requires_browser() {
+        assert!(BillaCz.requires_browser());
+    }
+
+    // --- is_recipe_url: albert.cz ---
+
+    #[test]
+    fn albert_accepts_recipe() {
+        let p = AlbertCz;
+        assert!(p.is_recipe_url("https://www.albert.cz/recepty/bbq-kure/r/a2805"));
+    }
+
+    #[test]
+    fn albert_accepts_recipe_with_trailing_slash() {
+        let p = AlbertCz;
+        assert!(p.is_recipe_url("https://www.albert.cz/recepty/kureci-nudlicky/r/a1234/"));
+    }
+
+    #[test]
+    fn albert_rejects_listing() {
+        let p = AlbertCz;
+        assert!(!p.is_recipe_url("https://www.albert.cz/recepty"));
+    }
+
+    #[test]
+    fn albert_rejects_search() {
+        let p = AlbertCz;
+        assert!(!p.is_recipe_url("https://www.albert.cz/recepty/vyhledavani/?q=kure%3Arelevance"));
+    }
+
+    #[test]
+    fn albert_requires_browser() {
+        assert!(AlbertCz.requires_browser());
+    }
+
+    // --- is_recipe_url: vareni.cz ---
+
+    #[test]
+    fn vareni_accepts_recipe() {
+        let p = VareniCz;
+        assert!(p.is_recipe_url("https://www.vareni.cz/recepty/kureci-stehna-na-kari/"));
+    }
+
+    #[test]
+    fn vareni_accepts_recipe_without_trailing_slash() {
+        let p = VareniCz;
+        assert!(p.is_recipe_url("https://www.vareni.cz/recepty/bramborovy-gulas"));
+    }
+
+    #[test]
+    fn vareni_rejects_listing() {
+        let p = VareniCz;
+        assert!(!p.is_recipe_url("https://www.vareni.cz/recepty/"));
+    }
+
+    #[test]
+    fn vareni_rejects_kategorie() {
+        let p = VareniCz;
+        assert!(!p.is_recipe_url("https://www.vareni.cz/recepty/kategorie/jidla-bez-masa/"));
+    }
+
+    #[test]
+    fn vareni_rejects_hledani() {
+        let p = VareniCz;
+        assert!(!p.is_recipe_url("https://www.vareni.cz/recepty/hledani/?q=kure"));
+    }
+
+    #[test]
+    fn vareni_rejects_fotorecepty() {
+        let p = VareniCz;
+        assert!(!p.is_recipe_url("https://www.vareni.cz/fotorecepty/"));
+    }
+
+    #[test]
+    fn vareni_requires_browser() {
+        assert!(VareniCz.requires_browser());
+    }
+
+    // --- is_recipe_url: bbcgoodfood.com ---
+
+    #[test]
+    fn bbcgoodfood_accepts_recipe() {
+        let p = BbcGoodFood;
+        assert!(p.is_recipe_url("https://www.bbcgoodfood.com/recipes/chicken-tikka-masala"));
+    }
+
+    #[test]
+    fn bbcgoodfood_accepts_recipe_with_trailing_slash() {
+        let p = BbcGoodFood;
+        assert!(p.is_recipe_url("https://www.bbcgoodfood.com/recipes/easy-pasta-salad/"));
+    }
+
+    #[test]
+    fn bbcgoodfood_rejects_collection() {
+        let p = BbcGoodFood;
+        assert!(!p.is_recipe_url("https://www.bbcgoodfood.com/recipes/collection/pasta-recipes"));
+    }
+
+    #[test]
+    fn bbcgoodfood_rejects_category() {
+        let p = BbcGoodFood;
+        assert!(!p.is_recipe_url(
+            "https://www.bbcgoodfood.com/recipes/category/special-occasion-collections"
+        ));
+    }
+
+    #[test]
+    fn bbcgoodfood_rejects_listing() {
+        let p = BbcGoodFood;
+        assert!(!p.is_recipe_url("https://www.bbcgoodfood.com/recipes"));
+    }
+
+    #[test]
+    fn bbcgoodfood_requires_browser() {
+        assert!(BbcGoodFood.requires_browser());
+    }
+
+    #[test]
+    fn bbcgoodfood_language_is_english() {
+        assert_eq!(BbcGoodFood.language(), "en");
+    }
+
+    // --- is_recipe_url: budgetbytes.com ---
+
+    #[test]
+    fn budgetbytes_accepts_recipe() {
+        let p = BudgetBytes;
+        assert!(p.is_recipe_url("https://www.budgetbytes.com/creamy-garlic-chicken-pasta/"));
+    }
+
+    #[test]
+    fn budgetbytes_accepts_recipe_without_trailing_slash() {
+        let p = BudgetBytes;
+        assert!(p.is_recipe_url("https://www.budgetbytes.com/one-pot-chili-pasta"));
+    }
+
+    #[test]
+    fn budgetbytes_rejects_category() {
+        let p = BudgetBytes;
+        assert!(!p.is_recipe_url("https://www.budgetbytes.com/category/recipes/"));
+    }
+
+    #[test]
+    fn budgetbytes_rejects_tag() {
+        let p = BudgetBytes;
+        assert!(!p.is_recipe_url("https://www.budgetbytes.com/tag/chicken/"));
+    }
+
+    #[test]
+    fn budgetbytes_rejects_about() {
+        let p = BudgetBytes;
+        assert!(!p.is_recipe_url("https://www.budgetbytes.com/about/"));
+    }
+
+    #[test]
+    fn budgetbytes_rejects_nested_path() {
+        let p = BudgetBytes;
+        assert!(!p.is_recipe_url("https://www.budgetbytes.com/category/recipes/chicken/"));
+    }
+
+    #[test]
+    fn budgetbytes_requires_browser() {
+        assert!(BudgetBytes.requires_browser());
+    }
+
+    #[test]
+    fn budgetbytes_language_is_english() {
+        assert_eq!(BudgetBytes.language(), "en");
     }
 }

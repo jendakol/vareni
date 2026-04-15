@@ -95,6 +95,7 @@ async fn main() -> anyhow::Result<()> {
         config: Arc::new(config),
         http_client,
         embedding,
+        browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
     };
 
     let app = create_router(state);

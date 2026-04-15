@@ -33,6 +33,7 @@ ort = { version = "2.0.0-rc.12", features = ["download-binaries", "ndarray"] }
 tokenizers = { version = "0.22", default-features = false, features = ["onig"] }
 ndarray = "0.17"
 urlencoding = "2"
+chromiumoxide = { version = "0.9", default-features = false }
 
 [dev-dependencies]
 testcontainers = "0.24"
