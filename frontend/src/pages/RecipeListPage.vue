@@ -66,20 +66,26 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, watch, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { useRecipeStore } from '../stores/recipes'
 import { updateRecipeStatus } from '../api/recipes'
 import { discover } from '../api/discover'
 import RecipeCard from '../components/RecipeCard.vue'
 
+const route = useRoute()
+const router = useRouter()
 const store = useRecipeStore()
 const toast = useToast()
 const search = ref('')
 const sort = ref('recent')
 let debounceTimer: ReturnType<typeof setTimeout>
 
-const activeTab = ref<'mine' | 'discovered' | 'rejected'>('mine')
+const validTabs = ['mine', 'discovered', 'rejected'] as const
+type Tab = typeof validTabs[number]
+const initialTab = validTabs.includes(route.query.tab as Tab) ? (route.query.tab as Tab) : 'mine'
+const activeTab = ref<Tab>(initialTab)
 const discoverPrompt = ref('')
 const discovering = ref(false)
 const discoveredCount = ref(0)
@@ -96,6 +102,10 @@ const sorts = [
   { value: 'least_cooked', label: 'Dlouho nevařené' },
   { value: 'prep_time', label: 'Nejrychlejší' },
 ]
+
+watch(activeTab, (tab) => {
+  router.replace({ query: tab === 'mine' ? {} : { tab } })
+})
 
 function statusForTab(): string | undefined {
   switch (activeTab.value) {

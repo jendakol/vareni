@@ -85,6 +85,31 @@ pub async fn score_candidate(
     Ok(result)
 }
 
+/// Translate a Czech search query to a target language for foreign recipe sites.
+/// Uses a fast Haiku call. Returns keywords suitable for a search engine.
+pub async fn translate_query(
+    client: &AnthropicClient,
+    czech_query: &str,
+    target_language: &str,
+) -> anyhow::Result<String> {
+    let system = format!(
+        "Translate the following Czech recipe search query to {target_language}. \
+         Return ONLY the translated keywords, nothing else. No quotes, no explanation. \
+         Keep it short and suitable for a recipe search engine."
+    );
+
+    let messages = vec![Message {
+        role: "user".into(),
+        content: serde_json::json!(czech_query),
+    }];
+
+    let response = client
+        .complete(DISCOVERY_MODEL, &system, messages, 100)
+        .await?;
+
+    Ok(response.trim().to_string())
+}
+
 /// Strip markdown code fences and find the JSON object.
 fn extract_json(response: &str) -> &str {
     let trimmed = response.trim();

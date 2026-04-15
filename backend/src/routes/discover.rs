@@ -1,5 +1,6 @@
 //! Discovery endpoint: orchestrates scrape -> parse -> embed -> score -> insert.
 
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use axum::Json;
@@ -100,14 +101,51 @@ pub async fn discover(
     let fetch_multiplier = 3; // process 3x more URLs than desired results
     let urls_per_site = ((count * fetch_multiplier) / providers.len()).max(3);
 
+    // Translate the user's Czech prompt for foreign-language providers (one Haiku call per language)
+    let mut translated_prompts: HashMap<&str, Option<String>> = HashMap::new();
+    translated_prompts.insert("cs", body.prompt.clone());
+
+    if body.prompt.is_some() {
+        let languages: Vec<&str> = providers
+            .iter()
+            .map(|p| p.language())
+            .filter(|l| *l != "cs")
+            .collect();
+        for lang in languages {
+            if translated_prompts.contains_key(lang) {
+                continue;
+            }
+            match crate::ai::discovery::translate_query(
+                &client,
+                body.prompt.as_deref().unwrap(),
+                lang,
+            )
+            .await
+            {
+                Ok(translated) => {
+                    tracing::info!(from = "cs", to = lang, original = ?body.prompt, translated = %translated, "Translated search query");
+                    translated_prompts.insert(lang, Some(translated));
+                }
+                Err(e) => {
+                    tracing::warn!(lang = lang, error = %e, "Failed to translate query, skipping language");
+                    translated_prompts.insert(lang, None);
+                }
+            }
+        }
+    }
+
     let mut all_urls: Vec<String> = Vec::new();
     let mut errors: Vec<SiteError> = Vec::new();
 
     for provider in &providers {
+        let prompt = translated_prompts
+            .get(provider.language())
+            .and_then(|p| p.as_deref());
+
         match scraper::fetch_recipe_urls(
             &state.http_client,
             provider.as_ref(),
-            body.prompt.as_deref(),
+            prompt,
             urls_per_site,
         )
         .await
@@ -133,7 +171,7 @@ pub async fn discover(
     }
 
     // Cap total URLs to process (more than requested, to survive filtering)
-    let max_process = (count * fetch_multiplier).min(20);
+    let max_process = (count * fetch_multiplier).min(30);
     all_urls.truncate(max_process);
 
     // Process each candidate (with rate limiting between fetches).

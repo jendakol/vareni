@@ -9,19 +9,25 @@ use scraper::{Html, Selector};
 /// A recipe provider that can list and validate recipe URLs from a specific site.
 pub trait RecipeProvider: Send + Sync {
     /// Human-readable site name (e.g. "fresh.iprima.cz").
-    fn name(&self) -> &str;
+    fn name(&self) -> &'static str;
 
     /// Base URL with scheme, no trailing slash (e.g. "https://fresh.iprima.cz").
-    fn base_url(&self) -> &str;
+    fn base_url(&self) -> &'static str;
+
+    /// CSS selector for extracting links from the listing page.
+    fn link_selector(&self) -> &'static str;
+
+    /// Language code for this provider (e.g. "cs", "de", "en").
+    /// Used to translate the user's Czech search query before constructing the search URL.
+    fn language(&self) -> &'static str {
+        "cs"
+    }
 
     /// Build the full URL to fetch for listing or search.
     ///
     /// When `prompt` is `Some`, the provider should return a search URL if supported,
     /// falling back to the listing URL otherwise.
     fn listing_url(&self, prompt: Option<&str>) -> String;
-
-    /// CSS selector for extracting links from the listing page.
-    fn link_selector(&self) -> &str;
 
     /// Is this URL a valid individual recipe page (not a listing, category, author, etc.)?
     fn is_recipe_url(&self, url: &str) -> bool;
@@ -31,11 +37,11 @@ pub trait RecipeProvider: Send + Sync {
 pub struct FreshIprima;
 
 impl RecipeProvider for FreshIprima {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "fresh.iprima.cz"
     }
 
-    fn base_url(&self) -> &str {
+    fn base_url(&self) -> &'static str {
         "https://fresh.iprima.cz"
     }
 
@@ -44,7 +50,7 @@ impl RecipeProvider for FreshIprima {
         format!("{}/recepty", self.base_url())
     }
 
-    fn link_selector(&self) -> &str {
+    fn link_selector(&self) -> &'static str {
         "a[href*=\"fresh.iprima.cz/\"]"
     }
 
@@ -74,11 +80,11 @@ impl RecipeProvider for FreshIprima {
 pub struct KuchyneLidlu;
 
 impl RecipeProvider for KuchyneLidlu {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "kuchynelidlu.cz"
     }
 
-    fn base_url(&self) -> &str {
+    fn base_url(&self) -> &'static str {
         "https://kuchynelidlu.cz"
     }
 
@@ -96,7 +102,7 @@ impl RecipeProvider for KuchyneLidlu {
         }
     }
 
-    fn link_selector(&self) -> &str {
+    fn link_selector(&self) -> &'static str {
         "a[href*=\"/recept/\"]"
     }
 
@@ -114,11 +120,11 @@ impl RecipeProvider for KuchyneLidlu {
 pub struct ReceptyOdAnicky;
 
 impl RecipeProvider for ReceptyOdAnicky {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "receptyodanicky.cz"
     }
 
-    fn base_url(&self) -> &str {
+    fn base_url(&self) -> &'static str {
         "https://www.receptyodanicky.cz"
     }
 
@@ -127,7 +133,7 @@ impl RecipeProvider for ReceptyOdAnicky {
         format!("{}/", self.base_url())
     }
 
-    fn link_selector(&self) -> &str {
+    fn link_selector(&self) -> &'static str {
         "a[href*=\"www.receptyodanicky.cz/\"]"
     }
 
@@ -162,11 +168,11 @@ impl RecipeProvider for ReceptyOdAnicky {
 pub struct TopRecepty;
 
 impl RecipeProvider for TopRecepty {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "toprecepty.cz"
     }
 
-    fn base_url(&self) -> &str {
+    fn base_url(&self) -> &'static str {
         "https://www.toprecepty.cz"
     }
 
@@ -175,7 +181,7 @@ impl RecipeProvider for TopRecepty {
             Some(query) => {
                 let keywords = simplify_query(query);
                 format!(
-                    "{}/vyhledavani/?q={}",
+                    "{}/vyhledavani-receptu?term={}",
                     self.base_url(),
                     urlencoding::encode(&keywords)
                 )
@@ -184,7 +190,7 @@ impl RecipeProvider for TopRecepty {
         }
     }
 
-    fn link_selector(&self) -> &str {
+    fn link_selector(&self) -> &'static str {
         "a[href*=\"/recept/\"]"
     }
 
@@ -205,11 +211,11 @@ impl RecipeProvider for TopRecepty {
 pub struct ApetitOnline;
 
 impl RecipeProvider for ApetitOnline {
-    fn name(&self) -> &str {
+    fn name(&self) -> &'static str {
         "apetitonline.cz"
     }
 
-    fn base_url(&self) -> &str {
+    fn base_url(&self) -> &'static str {
         "https://www.apetitonline.cz"
     }
 
@@ -227,7 +233,7 @@ impl RecipeProvider for ApetitOnline {
         }
     }
 
-    fn link_selector(&self) -> &str {
+    fn link_selector(&self) -> &'static str {
         "a[href*=\"/recept/\"]"
     }
 
@@ -243,6 +249,215 @@ impl RecipeProvider for ApetitOnline {
     }
 }
 
+/// Provider for recepty.cz.
+pub struct ReceptyCz;
+
+impl RecipeProvider for ReceptyCz {
+    fn name(&self) -> &'static str {
+        "recepty.cz"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.recepty.cz"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                let keywords = simplify_query(query);
+                format!(
+                    "{}/vyhledavani?text={}",
+                    self.base_url(),
+                    urlencoding::encode(&keywords)
+                )
+            }
+            None => format!("{}/", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recept/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        if !passes_common_filters(url, self.base_url()) {
+            return false;
+        }
+        // Recipe URLs: recepty.cz/recept/{slug}-{numeric_id}
+        let path = url
+            .strip_prefix("https://www.recepty.cz/recept/")
+            .unwrap_or("");
+        // Must end with -{digits} (recipe ID)
+        path.rsplit_once('-')
+            .is_some_and(|(_, id)| !id.is_empty() && id.chars().all(|c| c.is_ascii_digit()))
+    }
+}
+
+/// Provider for kaufland.cz (prodejny.kaufland.cz).
+pub struct KauflandCz;
+
+impl RecipeProvider for KauflandCz {
+    fn name(&self) -> &'static str {
+        "kaufland.cz"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://prodejny.kaufland.cz"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                let keywords = simplify_query(query);
+                format!(
+                    "{}/recepty/vyhledat-recept.html?searchsubmit=true&searchterm={}&recipes-search-category=all&time=all&difficulty=all",
+                    self.base_url(),
+                    urlencoding::encode(&keywords)
+                )
+            }
+            None => format!("{}/recepty/hlavni-jidla.html", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recepty/vyhledat-recept/recept.\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        // Recipe URLs: /recepty/vyhledat-recept/recept.{slug}.r_id={id}.html
+        url.contains("/recepty/vyhledat-recept/recept.")
+            && url.contains("r_id=")
+            && url.ends_with(".html")
+    }
+}
+
+/// Provider for receptynakazdyden.cz.
+pub struct ReceptyNaKazdyDen;
+
+impl RecipeProvider for ReceptyNaKazdyDen {
+    fn name(&self) -> &'static str {
+        "receptynakazdyden.cz"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.receptynakazdyden.cz"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                let keywords = simplify_query(query);
+                format!("{}/?s={}", self.base_url(), urlencoding::encode(&keywords))
+            }
+            None => format!("{}/", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recept/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        if !passes_common_filters(url, self.base_url()) {
+            return false;
+        }
+        // Recipe URLs: receptynakazdyden.cz/recept/{slug}/
+        let path = url
+            .strip_prefix("https://www.receptynakazdyden.cz/recept/")
+            .unwrap_or("");
+        let slug = path.trim_end_matches('/');
+        // Must be a non-empty slug, single segment (no nested paths)
+        !slug.is_empty() && !slug.contains('/')
+    }
+}
+
+/// Provider for chefkoch.de (German).
+pub struct Chefkoch;
+
+impl RecipeProvider for Chefkoch {
+    fn name(&self) -> &'static str {
+        "chefkoch.de"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://www.chefkoch.de"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            Some(query) => {
+                format!(
+                    "{}/rs/s0/{}/Rezepte.html",
+                    self.base_url(),
+                    urlencoding::encode(query)
+                )
+            }
+            // "Was koche ich heute?" (what should I cook today) — random/popular recipes
+            None => format!("{}/rezepte/", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/rezepte/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        // Recipe URLs: chefkoch.de/rezepte/{numeric_id}/{Slug}.html[?query_params]
+        let url_no_query = url.split('?').next().unwrap_or(url);
+        let path = url_no_query
+            .strip_prefix("https://www.chefkoch.de/rezepte/")
+            .unwrap_or("");
+        if path.is_empty() || !path.ends_with(".html") {
+            return false;
+        }
+        // Must start with numeric ID segment
+        path.split('/').next().is_some_and(|segment| {
+            !segment.is_empty() && segment.chars().all(|c| c.is_ascii_digit())
+        })
+    }
+
+    fn language(&self) -> &'static str {
+        "de"
+    }
+}
+
+/// Provider for foodnetwork.co.uk (English).
+pub struct FoodNetworkUk;
+
+impl RecipeProvider for FoodNetworkUk {
+    fn name(&self) -> &'static str {
+        "foodnetwork.co.uk"
+    }
+
+    fn base_url(&self) -> &'static str {
+        "https://foodnetwork.co.uk"
+    }
+
+    fn listing_url(&self, prompt: Option<&str>) -> String {
+        match prompt {
+            // Search results are Inertia.js JSON, not HTML links — listing only for now
+            Some(_) | None => format!("{}/recipes", self.base_url()),
+        }
+    }
+
+    fn link_selector(&self) -> &'static str {
+        "a[href*=\"/recipes/\"]"
+    }
+
+    fn is_recipe_url(&self, url: &str) -> bool {
+        let path = url
+            .strip_prefix("https://foodnetwork.co.uk/recipes/")
+            .unwrap_or("");
+        let slug = path.trim_end_matches('/');
+        // Must be a single-segment slug, not empty, no nested paths
+        !slug.is_empty() && !slug.contains('/')
+    }
+
+    fn language(&self) -> &'static str {
+        "en"
+    }
+}
+
 /// All available recipe providers.
 pub fn providers() -> Vec<Box<dyn RecipeProvider>> {
     vec![
@@ -251,6 +466,11 @@ pub fn providers() -> Vec<Box<dyn RecipeProvider>> {
         Box::new(ReceptyOdAnicky),
         Box::new(TopRecepty),
         Box::new(ApetitOnline),
+        Box::new(ReceptyCz),
+        Box::new(KauflandCz),
+        Box::new(ReceptyNaKazdyDen),
+        Box::new(Chefkoch),
+        Box::new(FoodNetworkUk),
     ]
 }
 
@@ -571,6 +791,191 @@ mod tests {
     fn apetit_rejects_pagination() {
         let provider = ApetitOnline;
         assert!(!provider.is_recipe_url("https://www.apetitonline.cz/recept/?page=2",));
+    }
+
+    // --- is_recipe_url: recepty.cz ---
+
+    #[test]
+    fn recepty_cz_accepts_recipe() {
+        let provider = ReceptyCz;
+        assert!(provider.is_recipe_url("https://www.recepty.cz/recept/kure-palivec-6056"));
+    }
+
+    #[test]
+    fn recepty_cz_accepts_another_recipe() {
+        let provider = ReceptyCz;
+        assert!(provider.is_recipe_url(
+            "https://www.recepty.cz/recept/salat-z-rimskeho-salatu-s-kurecim-prsem-12345"
+        ));
+    }
+
+    #[test]
+    fn recepty_cz_rejects_listing() {
+        let provider = ReceptyCz;
+        assert!(!provider.is_recipe_url("https://www.recepty.cz/recepty"));
+    }
+
+    #[test]
+    fn recepty_cz_rejects_slug_without_id() {
+        let provider = ReceptyCz;
+        assert!(!provider.is_recipe_url("https://www.recepty.cz/recept/kure-palivec"));
+    }
+
+    #[test]
+    fn recepty_cz_rejects_search() {
+        let provider = ReceptyCz;
+        assert!(!provider.is_recipe_url("https://www.recepty.cz/vyhledavani?text=kure"));
+    }
+
+    // --- is_recipe_url: kaufland.cz ---
+
+    #[test]
+    fn kaufland_accepts_recipe() {
+        let provider = KauflandCz;
+        assert!(provider.is_recipe_url(
+            "https://prodejny.kaufland.cz/recepty/vyhledat-recept/recept.pecena-kureci-stehna.r_id=CZ_1600.html"
+        ));
+    }
+
+    #[test]
+    fn kaufland_accepts_recipe_with_recipe_id() {
+        let provider = KauflandCz;
+        assert!(provider.is_recipe_url(
+            "https://prodejny.kaufland.cz/recepty/vyhledat-recept/recept.pad-thai.r_id=Recipe_12345.html"
+        ));
+    }
+
+    #[test]
+    fn kaufland_rejects_listing() {
+        let provider = KauflandCz;
+        assert!(!provider.is_recipe_url("https://prodejny.kaufland.cz/recepty.html"));
+    }
+
+    #[test]
+    fn kaufland_rejects_category() {
+        let provider = KauflandCz;
+        assert!(!provider.is_recipe_url("https://prodejny.kaufland.cz/recepty/hlavni-jidla.html"));
+    }
+
+    // --- is_recipe_url: receptynakazdyden.cz ---
+
+    #[test]
+    fn rnakazdyden_accepts_recipe() {
+        let provider = ReceptyNaKazdyDen;
+        assert!(provider.is_recipe_url("https://www.receptynakazdyden.cz/recept/kure-na-paprice/"));
+    }
+
+    #[test]
+    fn rnakazdyden_accepts_recipe_without_trailing_slash() {
+        let provider = ReceptyNaKazdyDen;
+        assert!(
+            provider.is_recipe_url("https://www.receptynakazdyden.cz/recept/kureci-cina-s-cuketou")
+        );
+    }
+
+    #[test]
+    fn rnakazdyden_rejects_listing() {
+        let provider = ReceptyNaKazdyDen;
+        assert!(!provider.is_recipe_url("https://www.receptynakazdyden.cz/recepty/hlavni-jidlo/"));
+    }
+
+    #[test]
+    fn rnakazdyden_rejects_category() {
+        let provider = ReceptyNaKazdyDen;
+        assert!(!provider.is_recipe_url("https://www.receptynakazdyden.cz/category/recepty/"));
+    }
+
+    #[test]
+    fn rnakazdyden_rejects_sponsored() {
+        let provider = ReceptyNaKazdyDen;
+        assert!(!provider.is_recipe_url("https://www.receptynakazdyden.cz/hellmanns/"));
+    }
+
+    // --- is_recipe_url: chefkoch.de ---
+
+    #[test]
+    fn chefkoch_accepts_recipe() {
+        let provider = Chefkoch;
+        assert!(provider.is_recipe_url(
+            "https://www.chefkoch.de/rezepte/472271140790423/Toskanischer-Haehnchen-Auflauf.html"
+        ));
+    }
+
+    #[test]
+    fn chefkoch_accepts_another_recipe() {
+        let provider = Chefkoch;
+        assert!(
+            provider.is_recipe_url("https://www.chefkoch.de/rezepte/1234567/Kartoffelsuppe.html")
+        );
+    }
+
+    #[test]
+    fn chefkoch_accepts_recipe_with_query_params() {
+        let provider = Chefkoch;
+        assert!(provider.is_recipe_url(
+            "https://www.chefkoch.de/rezepte/4193061674035989/Mediterranes-Gulasch.html?ck_source=search-recipe&ck_element=recipe_search_list"
+        ));
+    }
+
+    #[test]
+    fn chefkoch_rejects_listing() {
+        let provider = Chefkoch;
+        assert!(!provider.is_recipe_url("https://www.chefkoch.de/rezepte/"));
+    }
+
+    #[test]
+    fn chefkoch_rejects_suggestion_page() {
+        let provider = Chefkoch;
+        assert!(!provider.is_recipe_url("https://www.chefkoch.de/rezepte/was-koche-ich-heute/"));
+    }
+
+    #[test]
+    fn chefkoch_language_is_german() {
+        assert_eq!(Chefkoch.language(), "de");
+    }
+
+    // --- is_recipe_url: foodnetwork.co.uk ---
+
+    #[test]
+    fn foodnetwork_accepts_recipe() {
+        let provider = FoodNetworkUk;
+        assert!(provider.is_recipe_url("https://foodnetwork.co.uk/recipes/chicken-tikka-masala"));
+    }
+
+    #[test]
+    fn foodnetwork_accepts_recipe_with_trailing_slash() {
+        let provider = FoodNetworkUk;
+        assert!(provider.is_recipe_url("https://foodnetwork.co.uk/recipes/chicken-katsu-bowl/"));
+    }
+
+    #[test]
+    fn foodnetwork_rejects_listing() {
+        let provider = FoodNetworkUk;
+        assert!(!provider.is_recipe_url("https://foodnetwork.co.uk/recipes/"));
+    }
+
+    #[test]
+    fn foodnetwork_rejects_nested_path() {
+        let provider = FoodNetworkUk;
+        assert!(
+            !provider.is_recipe_url("https://foodnetwork.co.uk/recipes/collection/quick-dinners/")
+        );
+    }
+
+    #[test]
+    fn foodnetwork_language_is_english() {
+        assert_eq!(FoodNetworkUk.language(), "en");
+    }
+
+    // --- language defaults ---
+
+    #[test]
+    fn czech_providers_default_to_cs() {
+        assert_eq!(FreshIprima.language(), "cs");
+        assert_eq!(KuchyneLidlu.language(), "cs");
+        assert_eq!(ReceptyCz.language(), "cs");
+        assert_eq!(KauflandCz.language(), "cs");
+        assert_eq!(ReceptyNaKazdyDen.language(), "cs");
     }
 
     // --- simplify_query ---

@@ -41,6 +41,14 @@ async fn main() -> anyhow::Result<()> {
     default_headers.insert("Sec-Fetch-Mode", "navigate".parse().unwrap());
     default_headers.insert("Sec-Fetch-Site", "none".parse().unwrap());
     default_headers.insert("Sec-Fetch-User", "?1".parse().unwrap());
+    default_headers.insert(
+        "Sec-Ch-Ua",
+        "\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Google Chrome\";v=\"146\""
+            .parse()
+            .unwrap(),
+    );
+    default_headers.insert("Sec-Ch-Ua-Mobile", "?0".parse().unwrap());
+    default_headers.insert("Sec-Ch-Ua-Platform", "\"Linux\"".parse().unwrap());
     default_headers.insert("Upgrade-Insecure-Requests", "1".parse().unwrap());
 
     let http_client = reqwest::Client::builder()

@@ -31,16 +31,34 @@
       </div>
 
       <div class="flex items-center gap-2 mb-4 flex-wrap">
-        <button @click="startCooking"
-          class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
-          Vařit
-        </button>
-        <button v-if="recipe.status === 'saved'" @click="markTested"
-          class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium inline-flex items-center gap-2">
-          <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
-          Vyzkoušeno
-        </button>
+        <template v-if="recipe.status === 'discovered'">
+          <button @click="handleStatus('saved')"
+            class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Uložit
+          </button>
+          <button @click="handleStatus('rejected')"
+            class="px-5 py-2.5 bg-stone-200 text-stone-700 rounded-lg hover:bg-stone-300 font-medium">
+            Odmítnout
+          </button>
+          <button @click="handleStatus('rejected_similar')"
+            class="px-5 py-2.5 bg-red-100 text-red-700 rounded-lg hover:bg-red-200 font-medium"
+            title="Odmítne tento recept i podobné v budoucnu">
+            Odmítnout podobné
+          </button>
+        </template>
+        <template v-else>
+          <button @click="startCooking"
+            class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
+            Vařit
+          </button>
+          <button v-if="recipe.status === 'saved'" @click="markTested"
+            class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium inline-flex items-center gap-2">
+            <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
+            Vyzkoušeno
+          </button>
+        </template>
       </div>
 
       <p v-if="recipe.description" class="text-stone-600 mb-4">{{ recipe.description }}</p>
@@ -175,6 +193,19 @@ async function loadRecipe() {
 }
 
 function startCooking() { cooking.value = true }
+
+async function handleStatus(status: string) {
+  if (!recipe.value) return
+  if (status === 'rejected_similar' && !confirm('Odmítnout tento recept a podobné v budoucnu?')) return
+  try {
+    await updateRecipeStatus(recipe.value.id, status)
+    const msg = status === 'saved' ? 'Recept uložen' : 'Recept odmítnut'
+    toast.success(msg)
+    router.push({ path: '/recipes', query: { tab: 'discovered' } })
+  } catch (e: any) {
+    toast.error(e.message || 'Nepodařilo se změnit stav')
+  }
+}
 
 async function markTested() {
   if (!recipe.value) return
