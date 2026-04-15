@@ -130,7 +130,11 @@ import { listUsers, type User } from '../api/auth'
 
 const toast = useToast()
 
-const today = new Date().toISOString().slice(0, 10)
+function localIso(d: Date): string {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+const today = localIso(new Date())
 const date = ref(today)
 const users = ref<User[]>([])
 const entries = ref<MealPlanEntry[]>([])
@@ -143,9 +147,9 @@ const dateLabel = computed(() => {
 })
 
 function shiftDay(dir: number) {
-  const d = new Date(date.value + 'T00:00:00')
+  const d = new Date(date.value + 'T12:00:00') // noon avoids timezone/DST edge cases
   d.setDate(d.getDate() + dir)
-  const iso = d.toISOString().slice(0, 10)
+  const iso = localIso(d)
   if (iso > today) return
   date.value = iso
 }
