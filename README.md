@@ -7,6 +7,9 @@ API jako AI jádro.
 
 - **Recepty** — přidávání z textu, fotek (i více najednou) nebo URL. AI extrahuje ingredience, postup a metadata.
   Vyhledávání přes názvy, ingredience i tagy. Emoji, sdílení přes veřejný odkaz.
+- **Discovery** — automatické objevování nových receptů ze 14 kurátorských webů (CZ/DE/SK/EN).
+  AI hodnocení relevance, embedding deduplikace, respektování dietních omezení.
+  Headless Chromium pro SPA weby se stealth evasions.
 - **Plán** — navrhování jídel na x dní s ohledem na dietní omezení a historii. Potvrzování a mazání návrhů.
 - **Log** — zaznamenávání co kdo jedl, per-user (každý zvlášť nebo oba). Editace a mazání záznamů, navigace po dnech.
 - **Chat** — úprava receptu přes konverzaci s AI.
@@ -14,13 +17,15 @@ API jako AI jádro.
 
 ## Tech stack
 
-| Vrstva     | Technologie                   |
-|------------|-------------------------------|
-| Backend    | Rust / Axum                   |
-| Databáze   | PostgreSQL 18 + pgvector      |
-| Frontend   | Vue 3 + Vite + Tailwind CSS 4 |
-| AI         | Anthropic Claude API          |
-| DB přístup | sqlx (async)                  |
+| Vrstva     | Technologie                          |
+|------------|--------------------------------------|
+| Backend    | Rust / Axum                          |
+| Databáze   | PostgreSQL 18 + pgvector             |
+| Frontend   | Vue 3 + Vite + Tailwind CSS 4        |
+| AI         | Anthropic Claude API                 |
+| Embeddingy | ONNX Runtime + all-MiniLM-L6-v2     |
+| Scraping   | reqwest + headless Chromium (stealth)|
+| DB přístup | sqlx (async)                         |
 
 ## Spuštění
 
@@ -134,8 +139,10 @@ Image obsahuje frontend (statické soubory), backend a migrace. Vše běží na 
 
 ## Objevování receptů (volitelné)
 
-Funkce discovery automaticky hledá nové recepty z kurátorských webů, hodnotí je pomocí AI a filtruje
-duplicity přes vektorové embeddingy. Vyžaduje ONNX embedding model.
+Funkce discovery automaticky hledá nové recepty ze 14 kurátorských webů (CZ, DE, SK, EN), hodnotí je
+pomocí AI a filtruje duplicity přes vektorové embeddingy. Weby vyžadující JavaScript (SPA) jsou
+scrapovány přes headless Chromium se stealth evasions (obcházení detekce automatizace).
+Vyžaduje ONNX embedding model.
 
 ### Stažení modelu
 
