@@ -1,7 +1,7 @@
 # Vareni
 
-Self-hosted aplikace pro dva uživatele na správu receptů, plánování jídel a zaznamenávání, co jsme jedli. Používá Claude
-API jako AI jádro.
+Self-hosted aplikace pro správu receptů, plánování jídel a zaznamenávání, co jsme jedli.
+Používá Claude API jako AI jádro.
 
 ## Funkcionalita
 
@@ -15,6 +15,142 @@ API jako AI jádro.
 - **Chat** — úprava receptu přes konverzaci s AI.
 - **Ingestion** — automatické rozpoznání receptu z textu, fotek i webových stránek.
 
+## Spuštění (Docker Compose)
+
+Stačí Docker a API klíč k [Anthropic Claude](https://console.anthropic.com/).
+
+### 1. Konfigurace
+
+```bash
+cp .env.example .env
+```
+
+V `.env` nastavte:
+- `ANTHROPIC_API_KEY` — API klíč z Anthropic Console
+- `JWT_SECRET` — náhodný řetězec, min 32 znaků (např. `openssl rand -hex 32`)
+
+Ostatní hodnoty mají rozumné defaulty. Kompletní přehled viz [Konfigurace](#konfigurace).
+
+### 2. Start
+
+```bash
+docker compose up -d
+```
+
+Aplikace běží na **http://localhost:8080**. Databázové migrace proběhnou automaticky při prvním startu.
+
+### 3. Objevování receptů (volitelné)
+
+Funkce discovery automaticky hledá nové recepty ze 14 webů, hodnotí je AI a filtruje duplicity
+přes vektorové embeddingy. Vyžaduje stažení ONNX modelu (~86 MB):
+
+```bash
+mkdir -p models/all-MiniLM-L6-v2
+cd models/all-MiniLM-L6-v2
+wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
+wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
+```
+
+Pak v `docker-compose.yml` odkomentujte řádky s `models` volume a `EMBEDDING_MODEL_DIR` a restartujte:
+
+```bash
+docker compose up -d
+```
+
+Bez modelu aplikace funguje normálně — jen funkce discovery vrací 503.
+
+## Spuštění bez Docker Compose
+
+Pokud nechcete použít Compose (např. máte vlastní PostgreSQL), můžete aplikaci spustit přímo:
+
+```bash
+docker build -t vareni .
+
+docker run -d \
+  --name vareni \
+  -p 8080:8080 \
+  -v vareni-uploads:/app/uploads \
+  --env-file .env \
+  vareni
+```
+
+V `.env` musí `DATABASE_URL` ukazovat na PostgreSQL s rozšířením
+[pgvector](https://github.com/pgvector/pgvector). Pro discovery přidejte volume s modelem:
+
+```bash
+docker run -d \
+  --name vareni \
+  -p 8080:8080 \
+  -v vareni-uploads:/app/uploads \
+  -v ./models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2:ro \
+  -e EMBEDDING_MODEL_DIR=/app/models/all-MiniLM-L6-v2 \
+  --env-file .env \
+  vareni
+```
+
+## Konfigurace
+
+Nastavení přes proměnné prostředí (soubor `.env`). Docker Compose nastaví `DATABASE_URL` automaticky.
+
+| Proměnná              | Popis                                    | Default / povinné  |
+|-----------------------|------------------------------------------|---------------------|
+| `DATABASE_URL`        | PostgreSQL connection string             | povinné*            |
+| `ANTHROPIC_API_KEY`   | API klíč pro Claude                      | povinné             |
+| `JWT_SECRET`          | Tajný klíč pro JWT tokeny (min 32 znaků) | povinné             |
+| `JWT_EXPIRY_HOURS`    | Platnost tokenu v hodinách               | `720` (30 dní)      |
+| `BASE_URL`            | Veřejná URL aplikace                     | `http://localhost:8080` |
+| `VAPID_PUBLIC_KEY`    | VAPID klíč pro push notifikace           | volitelné           |
+| `VAPID_PRIVATE_KEY`   | VAPID privátní klíč                      | volitelné           |
+| `PUSH_NOTIFY_HOUR`    | Hodina pro připomínku večeře             | `20`                |
+| `EMBEDDING_MODEL_DIR` | Cesta k ONNX embedding modelu            | volitelné           |
+| `DISCOVERY_ENABLED`   | Povolení discovery                       | `true`              |
+
+\* Docker Compose nastavuje `DATABASE_URL` automaticky — nemusíte ho vyplňovat v `.env`.
+
+## Vývoj
+
+Pro přispívání do kódu nebo lokální vývoj bez Dockeru.
+
+### Požadavky
+
+- Rust (stable)
+- Node.js 18+
+- PostgreSQL 18 s rozšířením pgvector
+
+### Databáze (jen PostgreSQL)
+
+```bash
+docker compose up -d postgres
+```
+
+### Backend
+
+```bash
+cd backend
+cargo run
+```
+
+Server běží na `http://localhost:8080`. Migrace se spustí automaticky při startu.
+
+### Frontend
+
+```bash
+cd frontend
+npm install
+npm run dev
+```
+
+Vite dev server běží na `http://localhost:5173` s proxy na backend.
+
+### Produkční build frontendu
+
+```bash
+cd frontend
+npm run build
+```
+
+Výsledek je v `frontend/dist/`, backend ho servuje přímo.
+
 ## Tech stack
 
 | Vrstva     | Technologie                          |
@@ -26,162 +162,6 @@ API jako AI jádro.
 | Embeddingy | ONNX Runtime + all-MiniLM-L6-v2     |
 | Scraping   | reqwest + headless Chromium (stealth)|
 | DB přístup | sqlx (async)                         |
-
-## Spuštění
-
-### Požadavky
-
-- Rust (stable)
-- Node.js 18+
-- Docker (pro PostgreSQL)
-
-### 1. Databáze
-
-```bash
-docker compose up -d
-```
-
-### 2. Konfigurace
-
-```bash
-cp .env.example .env
-# Vyplňte ANTHROPIC_API_KEY a JWT_SECRET
-```
-
-### 3. Backend
-
-```bash
-cd backend
-cargo run
-```
-
-Server běží na `http://localhost:8080`. Migrace se spustí automaticky při startu.
-
-### 3b. Objevování receptů (volitelné)
-
-Pro funkci discovery stáhněte ONNX embedding model a nastavte cestu:
-
-```bash
-mkdir -p models/all-MiniLM-L6-v2
-cd models/all-MiniLM-L6-v2
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
-cd ../..
-```
-
-Přidejte do `.env`:
-```
-EMBEDDING_MODEL_DIR=./models/all-MiniLM-L6-v2
-```
-
-Bez modelu aplikace funguje normálně, jen discovery endpoint vrací 503.
-
-### 4. Frontend (vývoj)
-
-```bash
-cd frontend
-npm install
-npm run dev
-```
-
-Vite dev server běží na `http://localhost:5173` s proxy na backend.
-
-### 5. Frontend (produkce)
-
-```bash
-cd frontend
-npm run build
-```
-
-Výsledek je v `frontend/dist/`, backend ho servuje přímo.
-
-## Docker
-
-Multi-stage build — frontend i backend se zkompilují v jednom image.
-
-### Sestavení
-
-```bash
-docker build -t vareni .
-```
-
-### Spuštění
-
-```bash
-docker run -d \
-  --name vareni \
-  -p 8080:8080 \
-  -v vareni-uploads:/app/uploads \
-  --env-file .env \
-  vareni
-```
-
-Aplikace potřebuje PostgreSQL s rozšířením pgvector — buď přes `docker compose up -d` (image `pgvector/pgvector:pg18`,
-pro lokální vývoj), nebo vlastní instanci.  
-Proměnná `DATABASE_URL` v `.env` musí ukazovat na dostupnou databázi.
-
-Image obsahuje frontend (statické soubory), backend a migrace. Vše běží na portu `8080`.
-
-## Konfigurace (.env)
-
-| Proměnná            | Popis                                      |
-|---------------------|--------------------------------------------|
-| `DATABASE_URL`      | PostgreSQL connection string               |
-| `ANTHROPIC_API_KEY` | API klíč pro Claude                        |
-| `JWT_SECRET`        | Tajný klíč pro JWT tokeny (min 32 znaků)   |
-| `JWT_EXPIRY_HOURS`  | Platnost tokenu (default 720 = 30 dní)     |
-| `BASE_URL`          | Veřejná URL aplikace                       |
-| `VAPID_PUBLIC_KEY`  | VAPID klíč pro push notifikace (volitelné) |
-| `VAPID_PRIVATE_KEY` | VAPID privátní klíč (volitelné)            |
-| `PUSH_NOTIFY_HOUR`  | Hodina pro připomínku večeře (default 20)  |
-| `EMBEDDING_MODEL_DIR` | Cesta k ONNX embedding modelu (volitelné) |
-| `DISCOVERY_ENABLED` | Povolení discovery (default `true`)        |
-
-## Objevování receptů (volitelné)
-
-Funkce discovery automaticky hledá nové recepty ze 14 kurátorských webů (CZ, DE, SK, EN), hodnotí je
-pomocí AI a filtruje duplicity přes vektorové embeddingy. Weby vyžadující JavaScript (SPA) jsou
-scrapovány přes headless Chromium se stealth evasions (obcházení detekce automatizace).
-Vyžaduje ONNX embedding model.
-
-### Stažení modelu
-
-Potřebujete model [all-MiniLM-L6-v2](https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2)
-ve formátu ONNX (~86 MB `model.onnx` + `tokenizer.json`):
-
-```bash
-mkdir -p models/all-MiniLM-L6-v2
-cd models/all-MiniLM-L6-v2
-# Stáhněte model.onnx a tokenizer.json z Hugging Face
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/onnx/model.onnx
-wget https://huggingface.co/sentence-transformers/all-MiniLM-L6-v2/resolve/main/tokenizer.json
-```
-
-### Konfigurace
-
-| Proměnná              | Popis                                                     | Default          |
-|-----------------------|-----------------------------------------------------------|------------------|
-| `EMBEDDING_MODEL_DIR` | Cesta k adresáři s `model.onnx` a `tokenizer.json`       | (není nastaveno) |
-| `DISCOVERY_ENABLED`   | Povolení discovery (`true`/`false`)                       | `true`           |
-
-### Docker — připojení modelu
-
-```bash
-docker run -d \
-  --name vareni \
-  -p 8080:8080 \
-  -v vareni-uploads:/app/uploads \
-  -v ./models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2 \
-  -e EMBEDDING_MODEL_DIR=/app/models/all-MiniLM-L6-v2 \
-  --env-file .env \
-  vareni
-```
-
-### Graceful degradace
-
-Pokud model není dostupný (chybí `EMBEDDING_MODEL_DIR` nebo soubory v něm), aplikace nastartuje
-normálně — endpoint `POST /api/discover` vrací `503 Service Unavailable`. Všechny ostatní funkce
-(recepty, plán, log, chat) fungují bez omezení.
 
 ## Licence
 
