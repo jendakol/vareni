@@ -5,18 +5,28 @@ services:
       POSTGRES_USER: cooking
       POSTGRES_PASSWORD: cooking
       POSTGRES_DB: cookingapp
-    ports:
-      - "5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
 
-# To enable recipe discovery, download the all-MiniLM-L6-v2 model
-# and mount it as a volume for the backend:
-#  backend:
-#    volumes:
-#      - ./models/all-MiniLM-L6-v2:/models/all-MiniLM-L6-v2:ro
-#    environment:
-#      - EMBEDDING_MODEL_DIR=/models/all-MiniLM-L6-v2
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://cooking:cooking@postgres:5432/cookingapp
+      # Uncomment for recipe discovery (after downloading the model):
+      # EMBEDDING_MODEL_DIR: /app/models/all-MiniLM-L6-v2
+    env_file:
+      - .env
+    volumes:
+      - uploads:/app/uploads
+      # Uncomment for recipe discovery:
+      # - ./models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2:ro
+    depends_on:
+      - postgres
+    restart: unless-stopped
 
 volumes:
   pgdata:
+  uploads:
