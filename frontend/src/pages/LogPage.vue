@@ -23,7 +23,11 @@
           <div class="flex items-center gap-2 min-w-0">
             <span class="text-xs text-stone-400 uppercase shrink-0">{{ entry.meal_type === 'lunch' ? 'oběd' : 'večeře' }}</span>
             <span v-if="entry.user_name" class="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full shrink-0">{{ capitalize(entry.user_name) }}</span>
-            <span class="text-stone-800 truncate">{{ entry.free_text || 'Recept' }}</span>
+            <router-link v-if="entry.recipe_id" :to="`/recipes/${entry.recipe_id}`"
+              class="text-orange-700 hover:text-orange-800 hover:underline truncate">
+              {{ entry.recipe_title || 'Recept' }}
+            </router-link>
+            <span v-else class="text-stone-800 truncate">{{ entry.free_text || 'Recept' }}</span>
           </div>
           <div class="flex gap-1 shrink-0 ml-2">
             <button @click="startEdit(entry)" class="p-1 text-stone-400 hover:text-stone-700" title="Upravit">
@@ -123,19 +127,32 @@
 
 <script setup lang="ts">
 import { reactive, ref, computed, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { listPlan, createPlanEntry, updatePlanEntry, deletePlanEntry, type MealPlanEntry } from '../api/plan'
 import { listRecipes, type Recipe } from '../api/recipes'
 import { listUsers, type User } from '../api/auth'
 
 const toast = useToast()
+const route = useRoute()
+const router = useRouter()
 
 function localIso(d: Date): string {
   return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 }
 
 const today = localIso(new Date())
-const date = ref(today)
+const initialDate = typeof route.query.date === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(route.query.date)
+  ? route.query.date
+  : today
+const date = ref(initialDate)
+
+watch(date, (d) => {
+  const q = d === today ? undefined : d
+  if (route.query.date !== q) {
+    router.replace({ query: { ...route.query, date: q } })
+  }
+})
 const users = ref<User[]>([])
 const entries = ref<MealPlanEntry[]>([])
 const editingId = ref<string | null>(null)
@@ -175,6 +192,11 @@ async function loadEntries() {
 }
 
 watch(date, loadEntries)
+
+watch(() => route.query.date, (q) => {
+  const d = typeof q === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(q) ? q : today
+  if (d !== date.value) date.value = d
+})
 
 function startEdit(entry: MealPlanEntry) {
   editingId.value = entry.id
