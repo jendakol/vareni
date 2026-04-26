@@ -4,7 +4,8 @@ use axum::Router;
 use axum::routing::{get, patch, post, put};
 use tokio::sync::Semaphore;
 use tower_http::services::{ServeDir, ServeFile};
-use tower_http::trace::TraceLayer;
+use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tracing::Level;
 
 pub mod ai;
 pub mod auth;
@@ -95,6 +96,14 @@ pub fn create_router(state: AppState) -> Router {
         .fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )
-        .layer(TraceLayer::new_for_http())
+        .layer(
+            TraceLayer::new_for_http()
+                .make_span_with(
+                    DefaultMakeSpan::new()
+                        .level(Level::INFO)
+                        .include_headers(false),
+                )
+                .on_response(DefaultOnResponse::new().level(Level::INFO)),
+        )
         .with_state(state)
 }
