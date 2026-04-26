@@ -64,6 +64,31 @@ where
     }
 }
 
+/// Extractor that validates a static API token (for server-to-server calls, e.g. Home Assistant).
+pub struct ApiToken;
+
+impl<S> FromRequestParts<S> for ApiToken
+where
+    AppState: axum::extract::FromRef<S>,
+    S: Send + Sync,
+{
+    type Rejection = AppError;
+
+    async fn from_request_parts(parts: &mut Parts, state: &S) -> Result<Self, Self::Rejection> {
+        let app_state = AppState::from_ref(state);
+        let configured = app_state
+            .config
+            .log_api_token
+            .as_deref()
+            .ok_or(AppError::Unauthorized)?;
+        let provided = extract_bearer_token(&parts.headers)?;
+        if provided != configured {
+            return Err(AppError::Unauthorized);
+        }
+        Ok(ApiToken)
+    }
+}
+
 fn extract_bearer_token(headers: &HeaderMap) -> AppResult<String> {
     let header = headers
         .get("Authorization")

@@ -82,6 +82,7 @@ impl TestContext {
             vapid_contact: "mailto:test@test.com".into(),
             embedding_model_dir: None,
             discovery_enabled: false,
+            log_api_token: Some("test-log-token".into()),
         };
 
         let user1_token =

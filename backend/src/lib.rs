@@ -82,7 +82,9 @@ pub fn create_router(state: AppState) -> Router {
         .route(
             "/public/recipes/{slug}",
             get(routes::public::get_recipe_by_slug),
-        );
+        )
+        // Log API (Home Assistant)
+        .route("/log", post(routes::log::create_entry));
 
     let static_dir = state.config.static_dir.clone();
     let upload_dir = state.config.upload_dir.clone();

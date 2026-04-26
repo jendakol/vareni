@@ -16,6 +16,8 @@ pub struct Config {
     // Discovery
     pub embedding_model_dir: Option<String>,
     pub discovery_enabled: bool,
+    // Log API (Home Assistant)
+    pub log_api_token: Option<String>,
 }
 
 impl Config {
@@ -49,6 +51,7 @@ impl Config {
                 .unwrap_or_else(|_| "true".into())
                 .parse()
                 .unwrap_or(true),
+            log_api_token: env::var("LOG_API_TOKEN").ok(),
         })
     }
 }
