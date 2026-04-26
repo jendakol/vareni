@@ -1,29 +1,9 @@
 import { apiFetch } from './client'
 
-export interface Recipe {
-  id: string
-  title: string
-  description: string | null
-  servings: number | null
-  prep_time_min: number | null
-  cook_time_min: number | null
-  emoji: string | null
-  source_type: string | null
-  source_url: string | null
-  tags?: string[]
-  ingredients?: Ingredient[]
-  steps?: Step[]
-  is_public: boolean
-  public_slug: string | null
-  status: string
-  discovery_score: number | null
-  discovered_at: string | null
-  scored_at: string | null
-  canonical_name: string | null
-}
-
 export interface Ingredient {
   id: string
+  recipe_id: string
+  section_id: string
   name: string
   amount: number | null
   unit: string | null
@@ -32,8 +12,48 @@ export interface Ingredient {
 }
 
 export interface Step {
+  recipe_id: string
+  section_id: string
   step_order: number
   instruction: string
+}
+
+export type CookMethod = 'cooking' | 'baking' | 'frying' | 'steaming' | 'other'
+
+export interface Section {
+  id: string
+  recipe_id: string
+  label: string | null
+  description: string | null
+  prep_time_min: number | null
+  cook_time_min: number | null
+  cook_method: CookMethod | null
+  sort_order: number
+  ingredients: Ingredient[]
+  steps: Step[]
+}
+
+export interface Recipe {
+  id: string
+  title: string
+  description: string | null
+  servings: number | null
+  /** Derived sum over sections */
+  prep_time_min: number | null
+  /** Derived sum over sections */
+  cook_time_min: number | null
+  emoji: string | null
+  source_type: string | null
+  source_url: string | null
+  tags?: string[]
+  sections?: Section[]
+  is_public: boolean
+  public_slug: string | null
+  status: string
+  discovery_score: number | null
+  discovered_at: string | null
+  scored_at: string | null
+  canonical_name: string | null
 }
 
 export interface Paginated<T> {

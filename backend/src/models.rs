@@ -51,6 +51,30 @@ pub struct LoginResponse {
 
 // -- Recipes --
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, sqlx::Type)]
+#[sqlx(type_name = "cook_method", rename_all = "lowercase")]
+#[serde(rename_all = "lowercase")]
+pub enum CookMethod {
+    Cooking,
+    Baking,
+    Frying,
+    Steaming,
+    Other,
+}
+
+impl CookMethod {
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "cooking" => Some(Self::Cooking),
+            "baking" => Some(Self::Baking),
+            "frying" => Some(Self::Frying),
+            "steaming" => Some(Self::Steaming),
+            "other" => Some(Self::Other),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct Recipe {
     pub id: Uuid,
@@ -58,7 +82,9 @@ pub struct Recipe {
     pub title: String,
     pub description: Option<String>,
     pub servings: Option<i32>,
+    /// Derived: SUM(prep_time_min) over recipe_sections
     pub prep_time_min: Option<i32>,
+    /// Derived: SUM(cook_time_min) over recipe_sections
     pub cook_time_min: Option<i32>,
     pub source_type: Option<String>,
     pub source_url: Option<String>,
@@ -68,23 +94,41 @@ pub struct Recipe {
     pub public_slug: Option<String>,
     pub created_at: Option<OffsetDateTime>,
     pub updated_at: Option<OffsetDateTime>,
-    // Discovery fields
     pub status: String,
     #[sqlx(skip)]
     #[serde(skip_serializing)]
-    pub embedding: Option<()>, // pgvector handled separately, not in SELECT *
+    pub embedding: Option<()>,
     pub discovery_score: Option<f32>,
     pub discovered_at: Option<OffsetDateTime>,
     pub scored_at: Option<OffsetDateTime>,
     pub canonical_name: Option<String>,
 }
 
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct RecipeSection {
+    pub id: Uuid,
+    pub recipe_id: Uuid,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub prep_time_min: Option<i32>,
+    pub cook_time_min: Option<i32>,
+    pub cook_method: Option<CookMethod>,
+    pub sort_order: i32,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct RecipeSectionWithContent {
+    #[serde(flatten)]
+    pub section: RecipeSection,
+    pub ingredients: Vec<RecipeIngredient>,
+    pub steps: Vec<RecipeStep>,
+}
+
 #[derive(Debug, Serialize)]
 pub struct RecipeDetail {
     #[serde(flatten)]
     pub recipe: Recipe,
-    pub ingredients: Vec<RecipeIngredient>,
-    pub steps: Vec<RecipeStep>,
+    pub sections: Vec<RecipeSectionWithContent>,
     pub tags: Vec<String>,
 }
 
@@ -92,8 +136,9 @@ pub struct RecipeDetail {
 pub struct RecipeIngredient {
     pub id: Uuid,
     pub recipe_id: Uuid,
+    pub section_id: Uuid,
     pub ingredient_id: Option<Uuid>,
-    pub name: String, // joined from ingredients table
+    pub name: String,
     pub amount: Option<f64>,
     pub unit: Option<String>,
     pub note: Option<String>,
@@ -103,23 +148,9 @@ pub struct RecipeIngredient {
 #[derive(Debug, Clone, FromRow, Serialize)]
 pub struct RecipeStep {
     pub recipe_id: Uuid,
+    pub section_id: Uuid,
     pub step_order: i32,
     pub instruction: String,
-}
-
-#[derive(Debug, Deserialize)]
-pub struct CreateRecipeRequest {
-    pub title: String,
-    pub description: Option<String>,
-    pub servings: Option<i32>,
-    pub prep_time_min: Option<i32>,
-    pub cook_time_min: Option<i32>,
-    pub emoji: Option<String>,
-    pub source_type: Option<String>,
-    pub source_url: Option<String>,
-    pub tags: Option<Vec<String>>,
-    pub ingredients: Vec<IngredientInput>,
-    pub steps: Vec<StepInput>,
 }
 
 #[derive(Debug, Deserialize, Serialize, Clone)]
@@ -136,17 +167,44 @@ pub struct StepInput {
     pub instruction: String,
 }
 
+#[derive(Debug, Deserialize, Serialize, Clone)]
+pub struct SectionInput {
+    /// If present, an existing section's id (update path). Absent means insert.
+    pub id: Option<Uuid>,
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub prep_time_min: Option<i32>,
+    pub cook_time_min: Option<i32>,
+    #[serde(default)]
+    pub cook_method: Option<CookMethod>,
+    pub sort_order: i32,
+    pub ingredients: Vec<IngredientInput>,
+    pub steps: Vec<StepInput>,
+}
+
+#[derive(Debug, Deserialize)]
+pub struct CreateRecipeRequest {
+    pub title: String,
+    pub description: Option<String>,
+    pub servings: Option<i32>,
+    pub emoji: Option<String>,
+    pub source_type: Option<String>,
+    pub source_url: Option<String>,
+    pub tags: Option<Vec<String>>,
+    /// Must contain ≥1 section.
+    pub sections: Vec<SectionInput>,
+}
+
 #[derive(Debug, Deserialize)]
 pub struct UpdateRecipeRequest {
     pub title: Option<String>,
     pub description: Option<String>,
     pub servings: Option<i32>,
-    pub prep_time_min: Option<i32>,
-    pub cook_time_min: Option<i32>,
     pub emoji: Option<String>,
     pub tags: Option<Vec<String>>,
-    pub ingredients: Option<Vec<IngredientInput>>,
-    pub steps: Option<Vec<StepInput>>,
+    /// Full section set after edit. Sections without an `id` are inserts;
+    /// sections present in DB but missing from this list are deletes.
+    pub sections: Option<Vec<SectionInput>>,
 }
 
 #[derive(Debug, Deserialize)]

@@ -64,8 +64,7 @@ pub async fn discover(
         1000,
         existing_statuses,
     )
-    .await
-    .map_err(AppError::Sqlx)?;
+    .await?;
 
     let existing_titles: Vec<String> = existing_recipes
         .iter()
@@ -90,8 +89,7 @@ pub async fn discover(
         1000,
         rejected_statuses,
     )
-    .await
-    .map_err(AppError::Sqlx)?;
+    .await?;
     let rejected_titles: Vec<String> = rejected_recipes.iter().map(|r| r.title.clone()).collect();
     let rejected_titles_str = rejected_titles.join(", ");
 
@@ -309,7 +307,12 @@ async fn process_candidate(
     tracing::info!(url = %url, "Parsing recipe candidate");
     let parsed = crate::ai::ingest::parse_url(client, &state.http_client, browser, url).await?;
 
-    let ingredient_names: Vec<String> = parsed.ingredients.iter().map(|i| i.name.clone()).collect();
+    // Flatten ingredients from all sections for embedding/scoring purposes
+    let ingredient_names: Vec<String> = parsed
+        .sections
+        .iter()
+        .flat_map(|s| s.ingredients.iter().map(|i| i.name.clone()))
+        .collect();
     let tags: Vec<String> = parsed.tags.clone();
 
     // Step 2: Mechanical embedding pre-filter
@@ -402,6 +405,27 @@ async fn process_candidate(
         "Inserting discovered recipe"
     );
 
+    // B1: convert ParsedSection to SectionInput and pass through (preserves multi-section structure)
+    let sections: Vec<crate::models::SectionInput> = parsed
+        .sections
+        .iter()
+        .enumerate()
+        .map(|(idx, s)| crate::models::SectionInput {
+            id: None,
+            label: s.label.clone(),
+            description: s.description.clone(),
+            prep_time_min: s.prep_time_min,
+            cook_time_min: s.cook_time_min,
+            cook_method: s
+                .cook_method
+                .as_deref()
+                .and_then(crate::models::CookMethod::parse),
+            sort_order: idx as i32,
+            ingredients: s.ingredients.clone(),
+            steps: s.steps.clone(),
+        })
+        .collect();
+
     let recipe = db::recipes::create_discovered(
         &state.pool,
         owner_id,
@@ -412,11 +436,8 @@ async fn process_candidate(
         score.relevance_score,
         &final_embedding,
         parsed.servings,
-        parsed.prep_time_min,
-        parsed.cook_time_min,
         &tags,
-        &parsed.ingredients,
-        &parsed.steps,
+        &sections,
     )
     .await
     .map_err(|e| anyhow::anyhow!("Failed to insert discovered recipe: {e}"))?;

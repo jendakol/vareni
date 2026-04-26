@@ -17,8 +17,15 @@ async fn create_and_share(ctx: &common::TestContext) -> (String, String) {
         .body(Body::from(
             serde_json::to_string(&json!({
                 "title": "Shared Recipe",
-                "ingredients": [{ "name": "salt", "amount": 1.0, "unit": "tsp" }],
-                "steps": [{ "step_order": 1, "instruction": "Add salt" }]
+                "source_type": "manual",
+                "sections": [
+                    {
+                        "label": null,
+                        "sort_order": 0,
+                        "ingredients": [{ "name": "salt", "amount": 1.0, "unit": "tsp" }],
+                        "steps": [{ "step_order": 1, "instruction": "Add salt" }]
+                    }
+                ]
             }))
             .unwrap(),
         ))

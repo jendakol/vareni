@@ -18,7 +18,7 @@
 
         <div class="flex gap-4 text-sm text-stone-500">
           <span v-if="recipe.prep_time_min">Příprava: {{ recipe.prep_time_min }} min</span>
-          <span v-if="recipe.cook_time_min">Vaření: {{ recipe.cook_time_min }} min</span>
+          <span v-if="recipe.cook_time_min">{{ cookTimeLabel }}: {{ recipe.cook_time_min }} min</span>
           <span v-if="recipe.servings">{{ recipe.servings }} {{ recipe.servings === 1 ? 'porce' : recipe.servings! < 5 ? 'porce' : 'porcí' }}</span>
         </div>
 
@@ -26,19 +26,12 @@
 
         <section>
           <h4 class="font-semibold text-stone-700 mb-2">Ingredience</h4>
-          <IngredientList :ingredients="recipe.ingredients || []" />
+          <IngredientList :sections="recipe.sections || []" />
         </section>
 
         <section>
           <h4 class="font-semibold text-stone-700 mb-2">Postup</h4>
-          <ol class="space-y-3">
-            <li v-for="step in recipe.steps" :key="step.step_order" class="flex gap-3">
-              <span class="flex-shrink-0 w-6 h-6 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-xs font-medium">
-                {{ step.step_order }}
-              </span>
-              <p class="text-stone-700 text-sm pt-0.5">{{ step.instruction }}</p>
-            </li>
-          </ol>
+          <StepList :sections="recipe.sections || []" />
         </section>
       </div>
 
@@ -63,18 +56,33 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useToast } from 'vue-toastification'
 import * as api from '../api/recipes'
 import type { Recipe } from '../api/recipes'
 import TagChips from './TagChips.vue'
 import IngredientList from './IngredientList.vue'
+import StepList from './StepList.vue'
 
 const props = defineProps<{ recipeId: string }>()
 defineEmits<{ close: [] }>()
 
 const toast = useToast()
 const recipe = ref<Recipe | null>(null)
+
+const cookTimeLabel = computed(() => {
+  const sections = recipe.value?.sections ?? []
+  const methods = [...new Set(
+    sections.filter(s => s.cook_time_min != null && s.cook_method != null).map(s => s.cook_method!),
+  )]
+  if (methods.length !== 1) return 'Vaření'
+  switch (methods[0]) {
+    case 'baking': return 'Pečení'
+    case 'frying': return 'Smažení'
+    case 'steaming': return 'Dušení'
+    default: return 'Vaření'
+  }
+})
 
 onMounted(async () => {
   try {

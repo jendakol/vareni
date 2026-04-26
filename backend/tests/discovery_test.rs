@@ -11,15 +11,21 @@ fn recipe_json() -> serde_json::Value {
         "title": "Discovery Test Recipe",
         "description": "A recipe for discovery tests",
         "servings": 2,
-        "prep_time_min": 15,
-        "cook_time_min": 30,
         "source_type": "manual",
         "tags": ["test"],
-        "ingredients": [
-            { "name": "flour", "amount": 200.0, "unit": "g", "note": null }
-        ],
-        "steps": [
-            { "step_order": 1, "instruction": "Mix and cook" }
+        "sections": [
+            {
+                "label": null,
+                "prep_time_min": 15,
+                "cook_time_min": 30,
+                "sort_order": 0,
+                "ingredients": [
+                    { "name": "flour", "amount": 200.0, "unit": "g", "note": null }
+                ],
+                "steps": [
+                    { "step_order": 1, "instruction": "Mix and cook" }
+                ]
+            }
         ]
     })
 }

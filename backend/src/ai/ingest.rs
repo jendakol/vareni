@@ -13,13 +13,34 @@ IMPORTANT RULES:
 - If the source is a photo of a recipe (handwritten, printed, screenshot), do your best to read all text including amounts.
 - If the recipe is incomplete or unclear, fill in reasonable defaults based on your cooking knowledge — but mark them as guessed.
 - Write a short, appetizing Czech description (1-2 sentences) even if the source doesn't have one.
-- Estimate prep_time_min and cook_time_min if not explicitly stated.
+
+SECTIONS (parts of a recipe):
+- A recipe is composed of one or more sections. A section is a coherent part of the recipe with its own ingredients and steps.
+- Examples of real sections: "Těsto", "Náplň", "Drobenka", "Marináda", "Omáčka", "Ozdoba".
+- A heading becomes a section ONLY if it has at least one ingredient OR step directly under it. Sub-headings like "Tip", "Poznámka", "Jak podávat", "Varianty", "Podávání" are NOT sections — fold their text into the recipe-level description.
+- If the source has no part sub-headings, or only has informational sub-headings, emit exactly ONE section with `label: null`.
+- Don't invent sections. Only split when the source explicitly groups ingredients/steps under part headings.
+- Conditional headings ("Krém A nebo B", "Volitelná náplň") — emit them as a single section if both alternatives share an ingredient list. If they have separate ingredient lists, emit separate sections. If unclear, default to one section and put the alternatives in the description.
+- `step_order` is per-section, starting at 1 for each section.
+- Per-section description is optional; only fill if the source has an intro line for that part.
+- If the recipe has "assembly" or "finishing" steps that combine components from multiple sections (e.g. "spread filling over dough", "bake at 180 °C", "let cool and serve"), put them in a SEPARATE section. Label it after the dominant action ("Sestavení", "Pečení", "Dokončení") or leave label null if no obvious name fits. Do NOT force recipe-wide steps into the last ingredient section.
+
+TIMES:
+- Per-section `prep_time_min` and `cook_time_min` are optional.
+- Only fill per-section times when the source EXPLICITLY states a time for that specific part (e.g. "Příprava těsta: 15 min"). Do NOT invent or distribute times to individual sections by guessing.
+- If the source gives only an overall recipe time with no per-section breakdown, put it on the section where it most naturally belongs (e.g. put baking time on the baking/finishing section, not on an ingredient-prep section). If unclear, put it on the FIRST section and leave all others null.
+- If per-section times are explicit in the source, use them.
+- The recipe-level total is computed by the caller as the sum over sections — do NOT emit recipe-level prep_time_min/cook_time_min.
+
+COOK METHOD:
+- `cook_method` describes how this section is heat-treated. Set it only on sections that contain actual cooking/baking steps.
+- Possible values: "baking" (pečení — oven heat, e.g. "pečte při 180 °C"), "cooking" (vaření — stovetop liquid, e.g. "vařte 10 min"), "frying" (smažení/fritování — pan or deep-fry), "steaming" (dušení/vaření v páře), "other". Null for prep-only sections (mixing, kneading, cutting).
+- Infer from the section label or its steps: "Pečení", "bake at 180 °C" → "baking"; "Vaření", "cook until soft" → "cooking".
+- A single recipe may have multiple sections with different methods (e.g. "Vaření" + "Pečení").
 
 GUESSED FIELDS:
 - "guessed_fields" is an array of field names where you had to guess or infer content that was NOT explicitly in the source.
-- For example, if the source only had ingredients but no steps, include "steps" in guessed_fields.
-- If you estimated servings, include "servings". If you wrote the description yourself, include "description".
-- If individual steps were guessed, include "steps". If individual ingredients were guessed, include "ingredients".
+- Possible values: "description", "servings", "ingredients", "steps", "sections" (if any section was inferred or split), "prep_time_min", "cook_time_min", "tags".
 - Only mark fields that required significant guessing. Translating from another language is NOT guessing.
 
 Schema:
@@ -27,28 +48,42 @@ Schema:
   "title": string,
   "description": string | null,
   "servings": number | null,
-  "prep_time_min": number | null,
-  "cook_time_min": number | null,
   "tags": [string],
-  "ingredients": [{ "name": string, "amount": number | null, "unit": string | null, "note": string | null }],
-  "steps": [{ "step_order": number, "instruction": string }],
+  "sections": [
+    {
+      "label": string | null,
+      "description": string | null,
+      "prep_time_min": number | null,
+      "cook_time_min": number | null,
+      "cook_method": "baking" | "cooking" | "frying" | "steaming" | "other" | null,
+      "ingredients": [{ "name": string, "amount": number | null, "unit": string | null, "note": string | null }],
+      "steps": [{ "step_order": number, "instruction": string }]
+    }
+  ],
   "guessed_fields": [string]
 }
 
-For tags: use Czech or common tags. Examples: "rychlý", "vegetariánský", "polévka", "salát",
-"těstoviny", "česká kuchyně", "dezert", "snídaně", "one-pot", "pečení", "grilování".
-Assign 1-5 tags."#;
+The `sections` array MUST contain at least one element. For tags: use Czech or common tags. Examples: "rychlý", "vegetariánský", "polévka", "salát", "těstoviny", "česká kuchyně", "dezert", "snídaně", "one-pot", "pečení", "grilování". Assign 1-5 tags."#;
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ParsedSection {
+    pub label: Option<String>,
+    pub description: Option<String>,
+    pub prep_time_min: Option<i32>,
+    pub cook_time_min: Option<i32>,
+    #[serde(default)]
+    pub cook_method: Option<String>,
+    pub ingredients: Vec<IngredientInput>,
+    pub steps: Vec<StepInput>,
+}
 
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ParsedRecipe {
     pub title: String,
     pub description: Option<String>,
     pub servings: Option<i32>,
-    pub prep_time_min: Option<i32>,
-    pub cook_time_min: Option<i32>,
     pub tags: Vec<String>,
-    pub ingredients: Vec<IngredientInput>,
-    pub steps: Vec<StepInput>,
+    pub sections: Vec<ParsedSection>,
     #[serde(default)]
     pub guessed_fields: Vec<String>,
 }
@@ -500,12 +535,15 @@ pub async fn parse_url(
     let mut recipe = parse_text(client, &text).await?;
 
     // Supplement AI output with structured data from JSON-LD (more reliable than AI extraction)
+    // Times go on the first section (per spec: single total goes on first section).
     if let Some(meta) = jsonld_meta {
-        if recipe.prep_time_min.is_none() {
-            recipe.prep_time_min = meta.prep_time_min;
-        }
-        if recipe.cook_time_min.is_none() {
-            recipe.cook_time_min = meta.cook_time_min;
+        if let Some(first_section) = recipe.sections.first_mut() {
+            if first_section.prep_time_min.is_none() {
+                first_section.prep_time_min = meta.prep_time_min;
+            }
+            if first_section.cook_time_min.is_none() {
+                first_section.cook_time_min = meta.cook_time_min;
+            }
         }
         if recipe.servings.is_none() {
             recipe.servings = meta.servings;

@@ -6,19 +6,12 @@
 
     <section class="mb-8">
       <h2 class="text-lg font-semibold text-stone-700 mb-3">Ingredience</h2>
-      <IngredientList :ingredients="recipe.ingredients || []" />
+      <IngredientList :sections="recipe.sections || []" />
     </section>
 
     <section>
       <h2 class="text-lg font-semibold text-stone-700 mb-3">Postup</h2>
-      <ol class="space-y-4">
-        <li v-for="step in recipe.steps" :key="step.step_order" class="flex gap-3">
-          <span class="flex-shrink-0 w-7 h-7 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-medium">
-            {{ step.step_order }}
-          </span>
-          <p class="text-stone-700 pt-0.5">{{ step.instruction }}</p>
-        </li>
-      </ol>
+      <StepList :sections="recipe.sections || []" />
     </section>
   </div>
   <div v-else-if="loadError" class="text-center py-8">
@@ -35,6 +28,7 @@ import { getPublicRecipe } from '../api/recipes'
 import type { Recipe } from '../api/recipes'
 import TagChips from '../components/TagChips.vue'
 import IngredientList from '../components/IngredientList.vue'
+import StepList from '../components/StepList.vue'
 
 const route = useRoute()
 const toast = useToast()

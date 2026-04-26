@@ -16,8 +16,15 @@ async fn create_recipe_for_plan(ctx: &common::TestContext) -> String {
         .body(Body::from(
             serde_json::to_string(&json!({
                 "title": "Plan Recipe",
-                "ingredients": [{ "name": "salt", "amount": 1.0, "unit": "tsp" }],
-                "steps": [{ "step_order": 1, "instruction": "Season" }]
+                "source_type": "manual",
+                "sections": [
+                    {
+                        "label": null,
+                        "sort_order": 0,
+                        "ingredients": [{ "name": "salt", "amount": 1.0, "unit": "tsp" }],
+                        "steps": [{ "step_order": 1, "instruction": "Season" }]
+                    }
+                ]
             }))
             .unwrap(),
         ))

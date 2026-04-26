@@ -1,89 +1,218 @@
+use std::collections::HashMap;
+
 use pgvector::Vector;
 use sqlx::PgPool;
 use uuid::Uuid;
 
+use crate::error::AppError;
 use crate::models::{
-    CreateRecipeRequest, IngredientInput, Recipe, RecipeDetail, RecipeIngredient, RecipeStep,
-    StepInput, UpdateRecipeRequest,
+    CreateRecipeRequest, Recipe, RecipeDetail, RecipeIngredient, RecipeSection,
+    RecipeSectionWithContent, RecipeStep, UpdateRecipeRequest,
 };
 
 /// Explicit column list for Recipe queries (excludes `embedding` which is handled separately).
+/// prep_time_min and cook_time_min are derived from recipe_sections.
 const RECIPE_COLUMNS: &str = "r.id, r.owner_id, r.title, r.description, r.servings, \
-    r.prep_time_min, r.cook_time_min, r.source_type, r.source_url, r.emoji, \
+    (SELECT SUM(prep_time_min)::int FROM recipe_sections WHERE recipe_id = r.id) AS prep_time_min, \
+    (SELECT SUM(cook_time_min)::int FROM recipe_sections WHERE recipe_id = r.id) AS cook_time_min, \
+    r.source_type, r.source_url, r.emoji, \
     r.cover_image_path, r.is_public, r.public_slug, r.created_at, r.updated_at, \
     r.status, r.discovery_score, r.discovered_at, r.scored_at, r.canonical_name";
-
-/// Same columns but without the `r.` prefix (for RETURNING clauses).
-const RECIPE_RETURNING: &str = "id, owner_id, title, description, servings, \
-    prep_time_min, cook_time_min, source_type, source_url, emoji, \
-    cover_image_path, is_public, public_slug, created_at, updated_at, \
-    status, discovery_score, discovered_at, scored_at, canonical_name";
 
 pub async fn create(
     pool: &PgPool,
     owner_id: Uuid,
     req: &CreateRecipeRequest,
-) -> Result<RecipeDetail, sqlx::Error> {
+) -> Result<RecipeDetail, AppError> {
+    if req.sections.is_empty() {
+        return Err(AppError::BadRequest(
+            "Recipe must have at least one section".into(),
+        ));
+    }
+
     let mut tx = pool.begin().await?;
 
-    let sql = format!(
-        "INSERT INTO recipes (owner_id, title, description, servings, prep_time_min, cook_time_min, emoji, source_type, source_url)
-         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-         RETURNING {RECIPE_RETURNING}"
-    );
-    let recipe = sqlx::query_as::<_, Recipe>(&sql)
-        .bind(owner_id)
-        .bind(&req.title)
-        .bind(&req.description)
-        .bind(req.servings)
-        .bind(req.prep_time_min)
-        .bind(req.cook_time_min)
-        .bind(&req.emoji)
-        .bind(&req.source_type)
-        .bind(&req.source_url)
+    let recipe_id: Uuid = sqlx::query_scalar(
+        r#"
+        INSERT INTO recipes
+          (owner_id, title, description, servings, emoji, source_type, source_url, status)
+        VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'saved'))
+        RETURNING id
+        "#,
+    )
+    .bind(owner_id)
+    .bind(&req.title)
+    .bind(&req.description)
+    .bind(req.servings)
+    .bind(&req.emoji)
+    .bind(req.source_type.as_deref().unwrap_or("manual"))
+    .bind(&req.source_url)
+    .bind(Option::<String>::None) // status default
+    .fetch_one(&mut *tx)
+    .await?;
+
+    for section in &req.sections {
+        let section_id: Uuid = sqlx::query_scalar(
+            r#"
+            INSERT INTO recipe_sections
+              (recipe_id, label, description, prep_time_min, cook_time_min, cook_method, sort_order)
+            VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id
+            "#,
+        )
+        .bind(recipe_id)
+        .bind(section.label.as_deref().filter(|s| !s.is_empty()))
+        .bind(&section.description)
+        .bind(section.prep_time_min)
+        .bind(section.cook_time_min)
+        .bind(section.cook_method.clone())
+        .bind(section.sort_order)
         .fetch_one(&mut *tx)
         .await?;
 
-    let ingredients = insert_ingredients(&mut tx, recipe.id, &req.ingredients).await?;
-    let steps = insert_steps(&mut tx, recipe.id, &req.steps).await?;
-    let tags = if let Some(ref tag_list) = req.tags {
-        insert_tags(&mut tx, recipe.id, tag_list).await?;
-        tag_list.clone()
-    } else {
-        vec![]
-    };
+        for (idx, ing) in section.ingredients.iter().enumerate() {
+            let ingredient_id = find_or_create_ingredient(&mut *tx, &ing.name).await?;
+            sqlx::query(
+                r#"
+                INSERT INTO recipe_ingredients
+                  (recipe_id, section_id, ingredient_id, amount, unit, note, sort_order)
+                VALUES ($1, $2, $3, $4, $5, $6, $7)
+                "#,
+            )
+            .bind(recipe_id)
+            .bind(section_id)
+            .bind(ingredient_id)
+            .bind(ing.amount)
+            .bind(&ing.unit)
+            .bind(&ing.note)
+            .bind(idx as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        for (step_idx, step) in section.steps.iter().enumerate() {
+            sqlx::query(
+                r#"
+                INSERT INTO recipe_steps
+                  (recipe_id, section_id, step_order, instruction)
+                VALUES ($1, $2, $3, $4)
+                "#,
+            )
+            .bind(recipe_id)
+            .bind(section_id)
+            .bind((step_idx + 1) as i32) // S7: ignore LLM-supplied step_order, use sequential
+            .bind(&step.instruction)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
+    if let Some(tags) = &req.tags {
+        for tag in tags {
+            sqlx::query(
+                "INSERT INTO recipe_tags (recipe_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(recipe_id)
+            .bind(tag)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
 
     tx.commit().await?;
-
-    Ok(RecipeDetail {
-        recipe,
-        ingredients,
-        steps,
-        tags,
-    })
+    get_by_id(pool, recipe_id).await.map(|opt| opt.unwrap())
 }
 
-pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<RecipeDetail>, sqlx::Error> {
-    let sql = format!("SELECT {RECIPE_RETURNING} FROM recipes r WHERE r.id = $1");
-    let recipe = sqlx::query_as::<_, Recipe>(&sql)
-        .bind(id)
-        .fetch_optional(pool)
-        .await?;
+pub async fn get_by_id(pool: &PgPool, id: Uuid) -> Result<Option<RecipeDetail>, AppError> {
+    let recipe: Option<Recipe> = sqlx::query_as::<_, Recipe>(&format!(
+        "SELECT {RECIPE_COLUMNS} FROM recipes r WHERE r.id = $1"
+    ))
+    .bind(id)
+    .fetch_optional(pool)
+    .await?;
 
     let Some(recipe) = recipe else {
         return Ok(None);
     };
 
-    let ingredients = get_ingredients(pool, id).await?;
-    let steps = get_steps(pool, id).await?;
-    let tags = get_tags(pool, id).await?;
+    let detail = assemble_detail(pool, recipe).await?;
+    Ok(Some(detail))
+}
 
-    Ok(Some(RecipeDetail {
+async fn assemble_detail(pool: &PgPool, recipe: Recipe) -> Result<RecipeDetail, AppError> {
+    let id = recipe.id;
+
+    let sections: Vec<RecipeSection> = sqlx::query_as::<_, RecipeSection>(
+        r#"
+        SELECT id, recipe_id, label, description, prep_time_min, cook_time_min, cook_method, sort_order
+        FROM recipe_sections WHERE recipe_id = $1 ORDER BY sort_order, id
+        "#,
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+
+    let ingredients: Vec<RecipeIngredient> = sqlx::query_as::<_, RecipeIngredient>(
+        r#"
+        SELECT ri.id, ri.recipe_id, ri.section_id, ri.ingredient_id,
+               i.name, ri.amount, ri.unit, ri.note, ri.sort_order
+        FROM recipe_ingredients ri
+        LEFT JOIN ingredients i ON i.id = ri.ingredient_id
+        WHERE ri.recipe_id = $1
+        ORDER BY ri.section_id, ri.sort_order
+        "#,
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+
+    let steps: Vec<RecipeStep> = sqlx::query_as::<_, RecipeStep>(
+        r#"
+        SELECT recipe_id, section_id, step_order, instruction
+        FROM recipe_steps WHERE recipe_id = $1
+        ORDER BY section_id, step_order
+        "#,
+    )
+    .bind(id)
+    .fetch_all(pool)
+    .await?;
+
+    let tags: Vec<String> =
+        sqlx::query_scalar("SELECT tag FROM recipe_tags WHERE recipe_id = $1 ORDER BY tag")
+            .bind(id)
+            .fetch_all(pool)
+            .await?;
+
+    // Group ingredients and steps by section_id
+    let mut ings_by_section: HashMap<Uuid, Vec<RecipeIngredient>> = HashMap::new();
+    for ing in ingredients {
+        ings_by_section.entry(ing.section_id).or_default().push(ing);
+    }
+    let mut steps_by_section: HashMap<Uuid, Vec<RecipeStep>> = HashMap::new();
+    for step in steps {
+        steps_by_section
+            .entry(step.section_id)
+            .or_default()
+            .push(step);
+    }
+
+    let sections_with_content = sections
+        .into_iter()
+        .map(|s| {
+            let sid = s.id;
+            RecipeSectionWithContent {
+                ingredients: ings_by_section.remove(&sid).unwrap_or_default(),
+                steps: steps_by_section.remove(&sid).unwrap_or_default(),
+                section: s,
+            }
+        })
+        .collect();
+
+    Ok(RecipeDetail {
         recipe,
-        ingredients,
-        steps,
+        sections: sections_with_content,
         tags,
-    }))
+    })
 }
 
 pub async fn list(
@@ -94,9 +223,15 @@ pub async fn list(
     page: i64,
     per_page: i64,
     statuses: &[&str],
-) -> Result<(Vec<Recipe>, i64), sqlx::Error> {
+) -> Result<(Vec<Recipe>, i64), AppError> {
     let offset = (page - 1) * per_page;
     let statuses_vec: Vec<String> = statuses.iter().map(|s| s.to_string()).collect();
+
+    // S5: sort by total time (prep + cook), matching pre-sections semantics
+    let prep_time_order = "(\
+        COALESCE((SELECT SUM(prep_time_min) FROM recipe_sections WHERE recipe_id = r.id), 0) \
+        + COALESCE((SELECT SUM(cook_time_min) FROM recipe_sections WHERE recipe_id = r.id), 0)\
+    ) NULLS LAST";
 
     let (items, total) = if let Some(tag_filter) = tag {
         let sql = format!(
@@ -117,8 +252,7 @@ pub async fn list(
             },
             order = match sort {
                 "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" =>
-                    "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                "prep_time" => &format!("ORDER BY {prep_time_order}, r.title ASC"),
                 _ => "ORDER BY r.updated_at DESC",
             },
         );
@@ -163,7 +297,7 @@ pub async fn list(
             },
             order = match sort {
                 "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" => "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                "prep_time" => &format!("ORDER BY {prep_time_order}, r.title ASC"),
                 _ => "ORDER BY r.updated_at DESC",
             },
         );
@@ -205,8 +339,7 @@ pub async fn list(
             },
             order = match sort {
                 "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" =>
-                    "ORDER BY COALESCE(r.prep_time_min, 0) + COALESCE(r.cook_time_min, 0) ASC, r.title ASC",
+                "prep_time" => &format!("ORDER BY {prep_time_order}, r.title ASC"),
                 _ => "ORDER BY r.updated_at DESC",
             },
         );
@@ -233,69 +366,194 @@ pub async fn update(
     pool: &PgPool,
     id: Uuid,
     req: &UpdateRecipeRequest,
-) -> Result<Option<RecipeDetail>, sqlx::Error> {
+) -> Result<Option<RecipeDetail>, AppError> {
+    use std::collections::HashSet;
+
     let mut tx = pool.begin().await?;
 
-    let sql = format!("SELECT {RECIPE_RETURNING} FROM recipes r WHERE r.id = $1 FOR UPDATE");
-    let existing = sqlx::query_as::<_, Recipe>(&sql)
+    // B2: existence check inside transaction with FOR UPDATE to close TOCTOU window
+    let found: Option<i32> = sqlx::query_scalar("SELECT 1 FROM recipes WHERE id = $1 FOR UPDATE")
         .bind(id)
         .fetch_optional(&mut *tx)
         .await?;
-
-    let Some(_) = existing else {
+    if found.is_none() {
         return Ok(None);
-    };
+    }
 
+    // B2: always bump updated_at, even for section-only edits
     sqlx::query(
-        "UPDATE recipes SET
-            title = COALESCE($2, title),
-            description = COALESCE($3, description),
-            servings = COALESCE($4, servings),
-            prep_time_min = COALESCE($5, prep_time_min),
-            cook_time_min = COALESCE($6, cook_time_min),
-            emoji = COALESCE($7, emoji),
-            updated_at = now()
-         WHERE id = $1",
+        r#"
+        UPDATE recipes SET
+          title       = COALESCE($1, title),
+          description = COALESCE($2, description),
+          servings    = COALESCE($3, servings),
+          emoji       = COALESCE($4, emoji),
+          updated_at  = now()
+        WHERE id = $5
+        "#,
     )
-    .bind(id)
     .bind(&req.title)
     .bind(&req.description)
     .bind(req.servings)
-    .bind(req.prep_time_min)
-    .bind(req.cook_time_min)
     .bind(&req.emoji)
+    .bind(id)
     .execute(&mut *tx)
     .await?;
 
-    // Replace ingredients if provided
-    if let Some(ref ingredients) = req.ingredients {
-        sqlx::query("DELETE FROM recipe_ingredients WHERE recipe_id = $1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        insert_ingredients(&mut tx, id, ingredients).await?;
-    }
-
-    // Replace steps if provided
-    if let Some(ref steps) = req.steps {
-        sqlx::query("DELETE FROM recipe_steps WHERE recipe_id = $1")
-            .bind(id)
-            .execute(&mut *tx)
-            .await?;
-        insert_steps(&mut tx, id, steps).await?;
-    }
-
-    // Replace tags if provided
-    if let Some(ref tags) = req.tags {
+    // Tags: full replace if provided
+    if let Some(tags) = &req.tags {
         sqlx::query("DELETE FROM recipe_tags WHERE recipe_id = $1")
             .bind(id)
             .execute(&mut *tx)
             .await?;
-        insert_tags(&mut tx, id, tags).await?;
+        for tag in tags {
+            sqlx::query("INSERT INTO recipe_tags (recipe_id, tag) VALUES ($1, $2)")
+                .bind(id)
+                .bind(tag)
+                .execute(&mut *tx)
+                .await?;
+        }
+    }
+
+    // Sections: diff if provided
+    if let Some(incoming) = &req.sections {
+        if incoming.is_empty() {
+            return Err(AppError::BadRequest(
+                "Recipe must have at least one section".into(),
+            ));
+        }
+
+        // B3: reject duplicate section ids in payload
+        let incoming_ids_vec: Vec<Uuid> = incoming.iter().filter_map(|s| s.id).collect();
+        let incoming_ids_set: HashSet<Uuid> = incoming_ids_vec.iter().copied().collect();
+        if incoming_ids_set.len() != incoming_ids_vec.len() {
+            return Err(AppError::BadRequest(
+                "Duplicate section_id in payload".into(),
+            ));
+        }
+
+        // Validate every incoming section_id belongs to THIS recipe
+        let owned_ids: Vec<Uuid> =
+            sqlx::query_scalar("SELECT id FROM recipe_sections WHERE recipe_id = $1")
+                .bind(id)
+                .fetch_all(&mut *tx)
+                .await?;
+        let owned: std::collections::HashSet<Uuid> = owned_ids.iter().copied().collect();
+
+        for s in incoming {
+            if let Some(sid) = s.id {
+                if !owned.contains(&sid) {
+                    return Err(AppError::BadRequest(format!(
+                        "section_id {sid} does not belong to recipe {id}"
+                    )));
+                }
+            }
+        }
+
+        // Compute deletions: in DB, not in payload (reuse incoming_ids_set from B3 check above)
+        let to_delete: Vec<Uuid> = owned.difference(&incoming_ids_set).copied().collect();
+
+        for sid in to_delete {
+            sqlx::query("DELETE FROM recipe_sections WHERE id = $1")
+                .bind(sid)
+                .execute(&mut *tx)
+                .await?;
+            // CASCADE handles ingredients + steps
+        }
+
+        // Upsert each incoming section
+        for s in incoming {
+            let section_id = match s.id {
+                Some(existing) => {
+                    sqlx::query(
+                        r#"
+                        UPDATE recipe_sections SET
+                          label = $1, description = $2,
+                          prep_time_min = $3, cook_time_min = $4,
+                          cook_method = $5, sort_order = $6
+                        WHERE id = $7
+                        "#,
+                    )
+                    .bind(s.label.as_deref().filter(|x| !x.is_empty()))
+                    .bind(&s.description)
+                    .bind(s.prep_time_min)
+                    .bind(s.cook_time_min)
+                    .bind(s.cook_method.clone())
+                    .bind(s.sort_order)
+                    .bind(existing)
+                    .execute(&mut *tx)
+                    .await?;
+                    existing
+                }
+                None => {
+                    sqlx::query_scalar::<_, Uuid>(
+                        r#"
+                    INSERT INTO recipe_sections
+                      (recipe_id, label, description, prep_time_min, cook_time_min, cook_method, sort_order)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    RETURNING id
+                    "#,
+                    )
+                    .bind(id)
+                    .bind(s.label.as_deref().filter(|x| !x.is_empty()))
+                    .bind(&s.description)
+                    .bind(s.prep_time_min)
+                    .bind(s.cook_time_min)
+                    .bind(s.cook_method.clone())
+                    .bind(s.sort_order)
+                    .fetch_one(&mut *tx)
+                    .await?
+                }
+            };
+
+            // Delete-all-and-insert-all the section's ingredients and steps
+            sqlx::query("DELETE FROM recipe_ingredients WHERE section_id = $1")
+                .bind(section_id)
+                .execute(&mut *tx)
+                .await?;
+            for (idx, ing) in s.ingredients.iter().enumerate() {
+                let ingredient_id = find_or_create_ingredient(&mut *tx, &ing.name).await?;
+                sqlx::query(
+                    r#"
+                    INSERT INTO recipe_ingredients
+                      (recipe_id, section_id, ingredient_id, amount, unit, note, sort_order)
+                    VALUES ($1, $2, $3, $4, $5, $6, $7)
+                    "#,
+                )
+                .bind(id)
+                .bind(section_id)
+                .bind(ingredient_id)
+                .bind(ing.amount)
+                .bind(&ing.unit)
+                .bind(&ing.note)
+                .bind(idx as i32)
+                .execute(&mut *tx)
+                .await?;
+            }
+
+            sqlx::query("DELETE FROM recipe_steps WHERE section_id = $1")
+                .bind(section_id)
+                .execute(&mut *tx)
+                .await?;
+            for (step_idx, step) in s.steps.iter().enumerate() {
+                sqlx::query(
+                    r#"
+                    INSERT INTO recipe_steps
+                      (recipe_id, section_id, step_order, instruction)
+                    VALUES ($1, $2, $3, $4)
+                    "#,
+                )
+                .bind(id)
+                .bind(section_id)
+                .bind((step_idx + 1) as i32) // S7: ignore LLM-supplied step_order, use sequential
+                .bind(&step.instruction)
+                .execute(&mut *tx)
+                .await?;
+            }
+        }
     }
 
     tx.commit().await?;
-
     get_by_id(pool, id).await
 }
 
@@ -324,29 +582,20 @@ pub async fn remove_public_slug(pool: &PgPool, id: Uuid) -> Result<(), sqlx::Err
     Ok(())
 }
 
-pub async fn get_by_slug(pool: &PgPool, slug: &str) -> Result<Option<RecipeDetail>, sqlx::Error> {
-    let sql = format!(
-        "SELECT {RECIPE_RETURNING} FROM recipes r WHERE r.public_slug = $1 AND r.is_public = true"
-    );
-    let recipe = sqlx::query_as::<_, Recipe>(&sql)
-        .bind(slug)
-        .fetch_optional(pool)
-        .await?;
+pub async fn get_by_slug(pool: &PgPool, slug: &str) -> Result<Option<RecipeDetail>, AppError> {
+    let recipe: Option<Recipe> = sqlx::query_as::<_, Recipe>(&format!(
+        "SELECT {RECIPE_COLUMNS} FROM recipes r WHERE r.public_slug = $1 AND r.is_public = true"
+    ))
+    .bind(slug)
+    .fetch_optional(pool)
+    .await?;
 
     let Some(recipe) = recipe else {
         return Ok(None);
     };
 
-    let ingredients = get_ingredients(pool, recipe.id).await?;
-    let steps = get_steps(pool, recipe.id).await?;
-    let tags = get_tags(pool, recipe.id).await?;
-
-    Ok(Some(RecipeDetail {
-        recipe,
-        ingredients,
-        steps,
-        tags,
-    }))
+    let detail = assemble_detail(pool, recipe).await?;
+    Ok(Some(detail))
 }
 
 // ── Status transitions ──
@@ -385,14 +634,16 @@ pub async fn update_status(
         )));
     }
 
-    let sql = format!(
-        "UPDATE recipes SET status = $2, updated_at = now()
-         WHERE id = $1
-         RETURNING {RECIPE_RETURNING}"
-    );
-    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+    sqlx::query("UPDATE recipes SET status = $2, updated_at = now() WHERE id = $1")
         .bind(id)
         .bind(new_status)
+        .execute(pool)
+        .await?;
+
+    // S3: re-query with RECIPE_COLUMNS so derived prep/cook times are computed
+    let sql = format!("SELECT {RECIPE_COLUMNS} FROM recipes r WHERE r.id = $1");
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+        .bind(id)
         .fetch_optional(pool)
         .await?;
 
@@ -444,6 +695,7 @@ pub async fn find_similar(
 }
 
 /// Insert a discovered recipe with all discovery fields.
+/// B1: accepts sections (preserves multi-section structure from parser).
 #[allow(clippy::too_many_arguments)]
 pub async fn create_discovered(
     pool: &PgPool,
@@ -455,176 +707,128 @@ pub async fn create_discovered(
     discovery_score: f32,
     embedding: &[f32],
     servings: Option<i32>,
-    prep_time_min: Option<i32>,
-    cook_time_min: Option<i32>,
     tags: &[String],
-    ingredients: &[IngredientInput],
-    steps: &[StepInput],
+    sections: &[crate::models::SectionInput],
 ) -> Result<Recipe, sqlx::Error> {
     let vec = Vector::from(embedding.to_vec());
     let mut tx = pool.begin().await?;
 
-    let sql = format!(
+    let recipe_id: Uuid = sqlx::query_scalar(
         "INSERT INTO recipes (owner_id, title, description, source_type, source_url,
                               status, canonical_name, discovery_score, embedding,
-                              servings, prep_time_min, cook_time_min,
+                              servings,
                               discovered_at, scored_at)
          VALUES ($1, $2, $3, 'url', $4,
                  'discovered', $5, $6, $7,
-                 $8, $9, $10,
+                 $8,
                  now(), now())
-         RETURNING {RECIPE_RETURNING}"
-    );
-    let recipe = sqlx::query_as::<_, Recipe>(&sql)
-        .bind(owner_id)
-        .bind(title)
-        .bind(description)
-        .bind(source_url)
-        .bind(canonical_name)
-        .bind(discovery_score)
-        .bind(vec)
-        .bind(servings)
-        .bind(prep_time_min)
-        .bind(cook_time_min)
+         RETURNING id",
+    )
+    .bind(owner_id)
+    .bind(title)
+    .bind(description)
+    .bind(source_url)
+    .bind(canonical_name)
+    .bind(discovery_score)
+    .bind(vec)
+    .bind(servings)
+    .fetch_one(&mut *tx)
+    .await?;
+
+    // B1: insert each section (mirrors create path, preserves multi-section structure)
+    for section in sections {
+        let section_id: Uuid = sqlx::query_scalar(
+            "INSERT INTO recipe_sections (recipe_id, label, description, prep_time_min, cook_time_min, cook_method, sort_order)
+             VALUES ($1, $2, $3, $4, $5, $6, $7)
+             RETURNING id",
+        )
+        .bind(recipe_id)
+        .bind(section.label.as_deref().filter(|s| !s.is_empty()))
+        .bind(&section.description)
+        .bind(section.prep_time_min)
+        .bind(section.cook_time_min)
+        .bind(section.cook_method.clone())
+        .bind(section.sort_order)
         .fetch_one(&mut *tx)
         .await?;
 
+        for (idx, ing) in section.ingredients.iter().enumerate() {
+            let ingredient_id = sqlx::query_scalar::<_, Uuid>(
+                "INSERT INTO ingredients (name) VALUES ($1)
+                 ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+                 RETURNING id",
+            )
+            .bind(&ing.name)
+            .fetch_one(&mut *tx)
+            .await?;
+
+            sqlx::query(
+                "INSERT INTO recipe_ingredients (recipe_id, section_id, ingredient_id, amount, unit, note, sort_order)
+                 VALUES ($1, $2, $3, $4, $5, $6, $7)",
+            )
+            .bind(recipe_id)
+            .bind(section_id)
+            .bind(ingredient_id)
+            .bind(ing.amount)
+            .bind(&ing.unit)
+            .bind(&ing.note)
+            .bind(idx as i32)
+            .execute(&mut *tx)
+            .await?;
+        }
+
+        // S7: ignore LLM-supplied step_order, use sequential
+        for (step_idx, step) in section.steps.iter().enumerate() {
+            sqlx::query(
+                "INSERT INTO recipe_steps (recipe_id, section_id, step_order, instruction) VALUES ($1, $2, $3, $4)",
+            )
+            .bind(recipe_id)
+            .bind(section_id)
+            .bind((step_idx + 1) as i32)
+            .bind(&step.instruction)
+            .execute(&mut *tx)
+            .await?;
+        }
+    }
+
     if !tags.is_empty() {
-        insert_tags(&mut tx, recipe.id, tags).await?;
+        for tag in tags {
+            sqlx::query(
+                "INSERT INTO recipe_tags (recipe_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING",
+            )
+            .bind(recipe_id)
+            .bind(tag)
+            .execute(&mut *tx)
+            .await?;
+        }
     }
-    if !ingredients.is_empty() {
-        insert_ingredients(&mut tx, recipe.id, ingredients).await?;
-    }
-    for step in steps {
-        sqlx::query(
-            "INSERT INTO recipe_steps (recipe_id, step_order, instruction) VALUES ($1, $2, $3)",
-        )
-        .bind(recipe.id)
-        .bind(step.step_order)
-        .bind(&step.instruction)
-        .execute(&mut *tx)
-        .await?;
-    }
+
     tx.commit().await?;
+
+    // Return the recipe with derived times
+    let sql = format!("SELECT {RECIPE_COLUMNS} FROM recipes r WHERE r.id = $1");
+    let recipe = sqlx::query_as::<_, Recipe>(&sql)
+        .bind(recipe_id)
+        .fetch_one(pool)
+        .await?;
 
     Ok(recipe)
 }
 
 // ── Helpers ──
 
-async fn insert_ingredients(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    recipe_id: Uuid,
-    ingredients: &[IngredientInput],
-) -> Result<Vec<RecipeIngredient>, sqlx::Error> {
-    let mut result = Vec::new();
-    for (i, ing) in ingredients.iter().enumerate() {
-        // Upsert ingredient by name
-        let ingredient_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO ingredients (name) VALUES ($1)
-             ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
-             RETURNING id",
-        )
-        .bind(&ing.name)
-        .fetch_one(&mut **tx)
-        .await?;
-
-        let ri_id = sqlx::query_scalar::<_, Uuid>(
-            "INSERT INTO recipe_ingredients (recipe_id, ingredient_id, amount, unit, note, sort_order)
-             VALUES ($1, $2, $3, $4, $5, $6)
-             RETURNING id",
-        )
-        .bind(recipe_id)
-        .bind(ingredient_id)
-        .bind(ing.amount)
-        .bind(&ing.unit)
-        .bind(&ing.note)
-        .bind(i as i32)
-        .fetch_one(&mut **tx)
-        .await?;
-
-        result.push(RecipeIngredient {
-            id: ri_id,
-            recipe_id,
-            ingredient_id: Some(ingredient_id),
-            name: ing.name.clone(),
-            amount: ing.amount,
-            unit: ing.unit.clone(),
-            note: ing.note.clone(),
-            sort_order: i as i32,
-        });
-    }
-    Ok(result)
-}
-
-async fn insert_steps(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    recipe_id: Uuid,
-    steps: &[StepInput],
-) -> Result<Vec<RecipeStep>, sqlx::Error> {
-    let mut result = Vec::new();
-    for step in steps {
-        let row = sqlx::query_as::<_, RecipeStep>(
-            "INSERT INTO recipe_steps (recipe_id, step_order, instruction)
-             VALUES ($1, $2, $3) RETURNING *",
-        )
-        .bind(recipe_id)
-        .bind(step.step_order)
-        .bind(&step.instruction)
-        .fetch_one(&mut **tx)
-        .await?;
-        result.push(row);
-    }
-    Ok(result)
-}
-
-async fn insert_tags(
-    tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    recipe_id: Uuid,
-    tags: &[String],
-) -> Result<(), sqlx::Error> {
-    for tag in tags {
-        sqlx::query(
-            "INSERT INTO recipe_tags (recipe_id, tag) VALUES ($1, $2) ON CONFLICT DO NOTHING",
-        )
-        .bind(recipe_id)
-        .bind(tag)
-        .execute(&mut **tx)
-        .await?;
-    }
-    Ok(())
-}
-
-async fn get_ingredients(
-    pool: &PgPool,
-    recipe_id: Uuid,
-) -> Result<Vec<RecipeIngredient>, sqlx::Error> {
-    sqlx::query_as::<_, RecipeIngredient>(
-        "SELECT ri.id, ri.recipe_id, ri.ingredient_id, i.name, ri.amount, ri.unit, ri.note, ri.sort_order
-         FROM recipe_ingredients ri
-         JOIN ingredients i ON ri.ingredient_id = i.id
-         WHERE ri.recipe_id = $1
-         ORDER BY ri.sort_order",
+async fn find_or_create_ingredient(
+    conn: &mut sqlx::PgConnection,
+    name: &str,
+) -> Result<Uuid, sqlx::Error> {
+    sqlx::query_scalar::<_, Uuid>(
+        "INSERT INTO ingredients (name) VALUES ($1)
+         ON CONFLICT (name) DO UPDATE SET name = EXCLUDED.name
+         RETURNING id",
     )
-    .bind(recipe_id)
-    .fetch_all(pool)
+    .bind(name)
+    .fetch_one(conn)
     .await
-}
-
-async fn get_steps(pool: &PgPool, recipe_id: Uuid) -> Result<Vec<RecipeStep>, sqlx::Error> {
-    sqlx::query_as::<_, RecipeStep>(
-        "SELECT * FROM recipe_steps WHERE recipe_id = $1 ORDER BY step_order",
-    )
-    .bind(recipe_id)
-    .fetch_all(pool)
-    .await
-}
-
-async fn get_tags(pool: &PgPool, recipe_id: Uuid) -> Result<Vec<String>, sqlx::Error> {
-    sqlx::query_scalar::<_, String>("SELECT tag FROM recipe_tags WHERE recipe_id = $1 ORDER BY tag")
-        .bind(recipe_id)
-        .fetch_all(pool)
-        .await
 }
 
 #[cfg(test)]

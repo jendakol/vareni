@@ -68,7 +68,7 @@
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
           {{ recipe.prep_time_min }} min
         </span>
-        <span v-if="recipe.cook_time_min" class="flex items-center gap-1" title="Vaření">
+        <span v-if="recipe.cook_time_min" class="flex items-center gap-1" :title="cookTimeLabel">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 12c2-2.96 0-7-1-8 0 3.038-1.773 4.741-3 6-1.226 1.26-2 3.24-2 5a6 6 0 1 0 12 0c0-1.532-1.056-3.94-2-5-1.786 3-2.791 3-4 2z"/></svg>
           {{ recipe.cook_time_min }} min
         </span>
@@ -87,19 +87,12 @@
 
       <section class="mb-8">
         <h2 class="text-xl font-bold text-stone-800 mb-3">Ingredience</h2>
-        <IngredientList :ingredients="recipe.ingredients || []" />
+        <IngredientList :sections="recipe.sections || []" />
       </section>
 
       <section class="mb-8">
         <h2 class="text-xl font-bold text-stone-800 mb-3">Postup</h2>
-        <ol class="space-y-4">
-          <li v-for="step in recipe.steps" :key="step.step_order" class="flex gap-3">
-            <span class="flex-shrink-0 w-7 h-7 rounded-full bg-orange-100 text-orange-700 flex items-center justify-center text-sm font-medium">
-              {{ step.step_order }}
-            </span>
-            <p class="text-stone-700 pt-0.5">{{ step.instruction }}</p>
-          </li>
-        </ol>
+        <StepList :sections="recipe.sections || []" />
       </section>
 
       <!-- Chat FAB -->
@@ -118,7 +111,7 @@
       <RecipeForm :initial="editData" @save="handleUpdate" />
     </div>
 
-    <CookingMode v-if="cooking" :steps="recipe.steps || []" @close="cooking = false" />
+    <CookingMode v-if="cooking" :sections="recipe.sections || []" @close="cooking = false" />
     <ChatOverlay v-if="showChat" :recipe-id="recipe.id" @close="showChat = false" @update="refreshRecipe" />
   </div>
   <div v-else-if="loadError" class="text-center py-8">
@@ -137,6 +130,7 @@ import { updateRecipeStatus } from '../api/recipes'
 import type { Recipe } from '../api/recipes'
 import TagChips from '../components/TagChips.vue'
 import IngredientList from '../components/IngredientList.vue'
+import StepList from '../components/StepList.vue'
 import CookingMode from '../components/CookingMode.vue'
 import ChatOverlay from '../components/ChatOverlay.vue'
 import RecipeForm from '../components/RecipeForm.vue'
@@ -145,6 +139,20 @@ const route = useRoute()
 const router = useRouter()
 const toast = useToast()
 const recipe = ref<Recipe | null>(null)
+
+const cookTimeLabel = computed(() => {
+  const sections = recipe.value?.sections ?? []
+  const methods = [...new Set(
+    sections.filter(s => s.cook_time_min != null && s.cook_method != null).map(s => s.cook_method!),
+  )]
+  if (methods.length !== 1) return 'Vaření'
+  switch (methods[0]) {
+    case 'baking': return 'Pečení'
+    case 'frying': return 'Smažení'
+    case 'steaming': return 'Dušení'
+    default: return 'Vaření'
+  }
+})
 const cooking = ref(false)
 const showChat = ref(false)
 const editing = ref(false)
@@ -161,24 +169,14 @@ const sourceDomain = computed(() => {
 
 const editData = computed(() => {
   if (!recipe.value) return null
+  // Pass the full recipe shape to RecipeForm — it reads sections[] natively (Phase 3+)
   return {
     title: recipe.value.title,
     description: recipe.value.description,
     emoji: recipe.value.emoji,
     servings: recipe.value.servings,
-    prep_time_min: recipe.value.prep_time_min,
-    cook_time_min: recipe.value.cook_time_min,
     tags: recipe.value.tags || [],
-    ingredients: (recipe.value.ingredients || []).map(i => ({
-      name: i.name,
-      amount: i.amount,
-      unit: i.unit,
-      note: i.note,
-    })),
-    steps: (recipe.value.steps || []).map(s => ({
-      step_order: s.step_order,
-      instruction: s.instruction,
-    })),
+    sections: recipe.value.sections || [],
   }
 })
 
@@ -232,6 +230,7 @@ async function handleShare() {
 async function handleUpdate(data: any) {
   if (!recipe.value) return
   try {
+    // RecipeForm (Phase 3+) submits the full sections-based payload directly
     await api.updateRecipe(recipe.value.id, data)
     editing.value = false
     toast.success('Recept uložen')
@@ -243,7 +242,15 @@ async function handleUpdate(data: any) {
 
 async function handleDelete() {
   if (!recipe.value) return
-  if (!confirm(`Opravdu smazat "${recipe.value.title}"?`)) return
+  const sections = recipe.value.sections ?? []
+  const sectionCount = sections.length
+  const ingCount = sections.reduce((n, s) => n + s.ingredients.length, 0)
+  const stepCount = sections.reduce((n, s) => n + s.steps.length, 0)
+  const sectionWord = sectionCount === 1 ? 'skupinu' : sectionCount >= 2 && sectionCount <= 4 ? 'skupiny' : 'skupin'
+  const summary = sectionCount > 1
+    ? `Obsahuje ${sectionCount} ${sectionWord}, ${ingCount} ingrediencí, ${stepCount} kroků.`
+    : `Obsahuje ${ingCount} ingrediencí, ${stepCount} kroků.`
+  if (!confirm(`Smazat recept „${recipe.value.title}"? ${summary} Akce je nevratná.`)) return
   try {
     await api.deleteRecipe(recipe.value.id)
     toast.success('Recept smazán')
