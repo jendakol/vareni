@@ -71,7 +71,7 @@ pub async fn create(
         .await?;
 
         for (idx, ing) in section.ingredients.iter().enumerate() {
-            let ingredient_id = find_or_create_ingredient(&mut *tx, &ing.name).await?;
+            let ingredient_id = find_or_create_ingredient(&mut tx, &ing.name).await?;
             sqlx::query(
                 r#"
                 INSERT INTO recipe_ingredients
@@ -441,12 +441,12 @@ pub async fn update(
         let owned: std::collections::HashSet<Uuid> = owned_ids.iter().copied().collect();
 
         for s in incoming {
-            if let Some(sid) = s.id {
-                if !owned.contains(&sid) {
-                    return Err(AppError::BadRequest(format!(
-                        "section_id {sid} does not belong to recipe {id}"
-                    )));
-                }
+            if let Some(sid) = s.id
+                && !owned.contains(&sid)
+            {
+                return Err(AppError::BadRequest(format!(
+                    "section_id {sid} does not belong to recipe {id}"
+                )));
             }
         }
 
@@ -512,7 +512,7 @@ pub async fn update(
                 .execute(&mut *tx)
                 .await?;
             for (idx, ing) in s.ingredients.iter().enumerate() {
-                let ingredient_id = find_or_create_ingredient(&mut *tx, &ing.name).await?;
+                let ingredient_id = find_or_create_ingredient(&mut tx, &ing.name).await?;
                 sqlx::query(
                     r#"
                     INSERT INTO recipe_ingredients
@@ -617,7 +617,7 @@ pub async fn update_status(
     pool: &PgPool,
     id: Uuid,
     new_status: &str,
-) -> Result<Option<Recipe>, sqlx::Error> {
+) -> Result<Option<(String, Recipe)>, sqlx::Error> {
     let current = sqlx::query_scalar::<_, String>("SELECT status FROM recipes WHERE id = $1")
         .bind(id)
         .fetch_optional(pool)
@@ -647,7 +647,7 @@ pub async fn update_status(
         .fetch_optional(pool)
         .await?;
 
-    Ok(recipe)
+    Ok(recipe.map(|r| (current, r)))
 }
 
 // ── Embedding queries ──

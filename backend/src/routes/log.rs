@@ -9,6 +9,7 @@ use crate::AppState;
 use crate::auth::ApiToken;
 use crate::db;
 use crate::error::{AppError, AppResult};
+use crate::metrics::MEAL_LOG_ENTRIES_TOTAL;
 use crate::models::{CreateMealPlanRequest, MealPlanEntry};
 
 #[derive(Debug, Deserialize)]
@@ -60,5 +61,11 @@ pub async fn create_entry(
     };
 
     let entry = db::meal_plan::create(&state.pool, user_id, &req).await?;
+    metrics::counter!(
+        MEAL_LOG_ENTRIES_TOTAL,
+        "meal_type" => req.meal_type.clone(),
+        "source" => "ha_api",
+    )
+    .increment(1);
     Ok((StatusCode::CREATED, Json(entry)))
 }

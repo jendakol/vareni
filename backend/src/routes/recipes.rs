@@ -7,6 +7,7 @@ use crate::AppState;
 use crate::auth::AuthUser;
 use crate::db;
 use crate::error::{AppError, AppResult};
+use crate::metrics::RECIPE_STATUS_CHANGES_TOTAL;
 use crate::models::{
     CreateRecipeRequest, Paginated, Recipe, RecipeDetail, RecipeListQuery, ShareResponse,
     StatusUpdateRequest, UpdateRecipeRequest,
@@ -109,7 +110,15 @@ pub async fn update_status(
     }
 
     match db::recipes::update_status(&state.pool, id, &body.status).await {
-        Ok(Some(recipe)) => Ok(Json(recipe)),
+        Ok(Some((from_status, recipe))) => {
+            metrics::counter!(
+                RECIPE_STATUS_CHANGES_TOTAL,
+                "from_status" => from_status,
+                "to_status" => body.status.clone(),
+            )
+            .increment(1);
+            Ok(Json(recipe))
+        }
         Ok(None) => Err(AppError::NotFound),
         Err(sqlx::Error::Protocol(msg)) if msg.contains("Invalid status transition") => {
             Err(AppError::Conflict(msg))

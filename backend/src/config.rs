@@ -18,6 +18,8 @@ pub struct Config {
     pub discovery_enabled: bool,
     // Log API (Home Assistant)
     pub log_api_token: Option<String>,
+    // Metrics
+    pub metrics_gauge_refresh_secs: u64,
 }
 
 impl Config {
@@ -52,6 +54,10 @@ impl Config {
                 .parse()
                 .unwrap_or(true),
             log_api_token: env::var("LOG_API_TOKEN").ok(),
+            metrics_gauge_refresh_secs: env::var("METRICS_GAUGE_REFRESH_SECS")
+                .unwrap_or_else(|_| "60".into())
+                .parse()
+                .unwrap_or(60),
         })
     }
 }

@@ -9,6 +9,7 @@ use crate::ai::client::AnthropicClient;
 use crate::auth::AuthUser;
 use crate::db;
 use crate::error::{AppError, AppResult};
+use crate::metrics::MEAL_LOG_ENTRIES_TOTAL;
 use crate::models::{
     CreateMealPlanRequest, MealPlanEntry, MealPlanHistoryQuery, MealPlanQuery,
     UpdateMealPlanRequest,
@@ -89,6 +90,14 @@ pub async fn create(
 ) -> AppResult<(StatusCode, Json<MealPlanEntry>)> {
     let user_id = body.for_user_id.unwrap_or(auth.user_id);
     let entry = db::meal_plan::create(&state.pool, user_id, &body).await?;
+    if entry.entry_type.as_deref() == Some("logged") {
+        metrics::counter!(
+            MEAL_LOG_ENTRIES_TOTAL,
+            "meal_type" => body.meal_type.clone(),
+            "source" => "spa",
+        )
+        .increment(1);
+    }
     Ok((StatusCode::CREATED, Json(entry)))
 }
 

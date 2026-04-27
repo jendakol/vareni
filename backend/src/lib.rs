@@ -14,6 +14,7 @@ pub mod config;
 pub mod db;
 pub mod embedding;
 pub mod error;
+pub mod metrics;
 pub mod models;
 pub mod push_notifier;
 pub mod routes;
@@ -29,6 +30,8 @@ pub struct AppState {
 }
 
 pub fn create_router(state: AppState) -> Router {
+    let (prometheus_layer, prometheus_handle) = metrics::setup();
+
     let api = Router::new()
         // Auth
         .route("/auth/login", post(routes::auth::login))
@@ -92,10 +95,15 @@ pub fn create_router(state: AppState) -> Router {
 
     Router::new()
         .nest("/api", api)
+        .route(
+            "/metrics",
+            get(move || async move { prometheus_handle.render() }),
+        )
         .nest_service("/uploads", ServeDir::new(&upload_dir))
         .fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )
+        .layer(prometheus_layer)
         .layer(
             TraceLayer::new_for_http()
                 .make_span_with(

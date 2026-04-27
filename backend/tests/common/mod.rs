@@ -16,6 +16,7 @@ pub struct TestContext {
 }
 
 impl TestContext {
+    #[allow(dead_code)]
     pub async fn new() -> Self {
         let image = GenericImage::new("pgvector/pgvector", "pg18")
             .with_wait_for(testcontainers::core::WaitFor::message_on_stderr(
@@ -83,6 +84,7 @@ impl TestContext {
             embedding_model_dir: None,
             discovery_enabled: false,
             log_api_token: Some("test-log-token".into()),
+            metrics_gauge_refresh_secs: 60,
         };
 
         let user1_token =
