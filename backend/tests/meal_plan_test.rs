@@ -232,3 +232,64 @@ async fn delete_meal_plan_entry() {
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
     assert_eq!(resp.status(), StatusCode::NO_CONTENT);
 }
+
+#[tokio::test]
+async fn suggest_free_text_returns_distinct_matches_ignoring_diacritics() {
+    let ctx = common::TestContext::new().await;
+    let (key, value) = ctx.auth_header_1();
+
+    // Seed three free-text entries: two duplicates and one different
+    for (date, text) in [
+        ("2026-04-10", "Chleba s lučinou"),
+        ("2026-04-12", "Chleba s lučinou"),
+        ("2026-04-13", "Rizoto"),
+    ] {
+        let req = Request::builder()
+            .method("POST")
+            .uri("/api/plan")
+            .header("Content-Type", "application/json")
+            .header(&key, &value)
+            .body(Body::from(
+                serde_json::to_string(&json!({
+                    "date": date,
+                    "meal_type": "dinner",
+                    "free_text": text,
+                }))
+                .unwrap(),
+            ))
+            .unwrap();
+        let resp = ctx.router.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+    }
+
+    // Query without diacritics, lowercase — should match "Chleba s lučinou"
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/plan/suggest_free_text?q=lucinou")
+        .header(&key, &value)
+        .body(Body::empty())
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 1, "expected one distinct match, got {arr:?}");
+    assert_eq!(arr[0], "Chleba s lučinou");
+
+    // Broader query should return both distinct meals
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/plan/suggest_free_text?q=o")
+        .header(&key, &value)
+        .body(Body::empty())
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    let arr = json.as_array().unwrap();
+    assert_eq!(arr.len(), 2);
+    // Most recent first: Rizoto (2026-04-13) before Chleba s lučinou (2026-04-12)
+    assert_eq!(arr[0], "Rizoto");
+    assert_eq!(arr[1], "Chleba s lučinou");
+}

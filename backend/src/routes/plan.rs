@@ -135,3 +135,19 @@ pub async fn history(
     let entries = db::meal_plan::history(&state.pool, days).await?;
     Ok(Json(entries))
 }
+
+#[derive(Debug, serde::Deserialize)]
+pub struct SuggestFreeTextQuery {
+    pub q: String,
+    pub limit: Option<i64>,
+}
+
+pub async fn suggest_free_text(
+    State(state): State<AppState>,
+    _auth: AuthUser,
+    Query(query): Query<SuggestFreeTextQuery>,
+) -> AppResult<Json<Vec<String>>> {
+    let limit = query.limit.unwrap_or(10).clamp(1, 50);
+    let suggestions = db::meal_plan::suggest_free_text(&state.pool, &query.q, limit).await?;
+    Ok(Json(suggestions))
+}

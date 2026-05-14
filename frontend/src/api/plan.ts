@@ -32,6 +32,11 @@ export function deletePlanEntry(id: string) {
   return apiFetch<void>(`/plan/${id}`, { method: 'DELETE' })
 }
 
+export function suggestFreeText(q: string, limit = 10) {
+  const params = new URLSearchParams({ q, limit: String(limit) })
+  return apiFetch<string[]>(`/plan/suggest_free_text?${params}`)
+}
+
 export function suggestPlan(prompt: string, planningFor: 'both' | 'me' = 'both') {
   return apiFetch<any[]>('/plan/suggest', {
     method: 'POST',

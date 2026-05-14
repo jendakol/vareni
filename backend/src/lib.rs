@@ -64,6 +64,10 @@ pub fn create_router(state: AppState) -> Router {
         .route("/chat/{recipe_id}", post(routes::chat::chat))
         // Meal plan (suggest BEFORE {id} to avoid conflict)
         .route("/plan/suggest", post(routes::plan::suggest))
+        .route(
+            "/plan/suggest_free_text",
+            get(routes::plan::suggest_free_text),
+        )
         .route("/plan/history", get(routes::plan::history))
         .route("/plan", get(routes::plan::list).post(routes::plan::create))
         .route(

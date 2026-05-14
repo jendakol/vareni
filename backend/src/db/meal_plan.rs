@@ -53,6 +53,27 @@ pub async fn list_by_range(
     .await
 }
 
+pub async fn suggest_free_text(
+    pool: &PgPool,
+    q: &str,
+    limit: i64,
+) -> Result<Vec<String>, sqlx::Error> {
+    let pattern = format!("%{q}%");
+    sqlx::query_scalar::<_, String>(
+        "SELECT free_text
+         FROM meal_plan_entries
+         WHERE free_text IS NOT NULL
+           AND unaccent(free_text) ILIKE unaccent($1)
+         GROUP BY free_text
+         ORDER BY MAX(date) DESC
+         LIMIT $2",
+    )
+    .bind(pattern)
+    .bind(limit)
+    .fetch_all(pool)
+    .await
+}
+
 pub async fn history(pool: &PgPool, days: i64) -> Result<Vec<MealPlanEntry>, sqlx::Error> {
     sqlx::query_as::<_, MealPlanEntry>(
         "SELECT m.*, u.name AS user_name, r.title AS recipe_title FROM meal_plan_entries m LEFT JOIN users u ON m.user_id = u.id LEFT JOIN recipes r ON m.recipe_id = r.id WHERE m.date >= CURRENT_DATE - $1::integer

@@ -111,9 +111,18 @@
         </div>
 
         <!-- Free text -->
-        <div v-else>
-          <input v-model="texts[meal.key]" :placeholder="`Co jste měli k ${meal.dative}?`"
+        <div v-else class="relative">
+          <input v-model="texts[meal.key]" @input="searchFreeText(meal.key)" @blur="hideTextSuggestions(meal.key)"
+            :placeholder="`Co jste měli k ${meal.dative}?`"
             class="w-full px-4 py-3 border border-stone-300 rounded-lg text-lg" />
+          <ul v-if="textSuggestions[meal.key]?.length"
+            class="absolute z-10 left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+            <li v-for="s in textSuggestions[meal.key]" :key="s"
+              @mousedown.prevent="selectFreeText(meal.key, s)"
+              class="px-4 py-2 hover:bg-orange-50 cursor-pointer text-stone-700">
+              {{ s }}
+            </li>
+          </ul>
         </div>
       </div>
 
@@ -129,7 +138,7 @@
 import { reactive, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
-import { listPlan, createPlanEntry, updatePlanEntry, deletePlanEntry, type MealPlanEntry } from '../api/plan'
+import { listPlan, createPlanEntry, updatePlanEntry, deletePlanEntry, suggestFreeText, type MealPlanEntry } from '../api/plan'
 import { listRecipes, type Recipe } from '../api/recipes'
 import { listUsers, type User } from '../api/auth'
 
@@ -234,6 +243,7 @@ const texts = reactive<Record<string, string>>({ lunch: '', dinner: '' })
 const searches = reactive<Record<string, string>>({ lunch: '', dinner: '' })
 const selected = reactive<Record<string, Recipe | null>>({ lunch: null, dinner: null })
 const suggestions = reactive<Record<string, Recipe[]>>({ lunch: [], dinner: [] })
+const textSuggestions = reactive<Record<string, string[]>>({ lunch: [], dinner: [] })
 const whoAte = reactive<Record<string, string>>({ lunch: 'both', dinner: 'both' })
 const saving = ref(false)
 
@@ -256,6 +266,32 @@ function selectRecipe(meal: string, recipe: Recipe) {
   selected[meal] = recipe
   searches[meal] = recipe.title
   suggestions[meal] = []
+}
+
+function searchFreeText(meal: string) {
+  clearTimeout(debounceTimers[`text_${meal}`])
+  debounceTimers[`text_${meal}`] = setTimeout(async () => {
+    const q = texts[meal]?.trim()
+    if (!q || q.length < 2) {
+      textSuggestions[meal] = []
+      return
+    }
+    try {
+      textSuggestions[meal] = await suggestFreeText(q)
+    } catch {
+      textSuggestions[meal] = []
+    }
+  }, 300)
+}
+
+function selectFreeText(meal: string, value: string) {
+  texts[meal] = value
+  textSuggestions[meal] = []
+}
+
+function hideTextSuggestions(meal: string) {
+  // Delay slightly so click/mousedown on suggestion still fires
+  setTimeout(() => { textSuggestions[meal] = [] }, 150)
 }
 
 async function saveLog() {
@@ -294,6 +330,8 @@ async function saveLog() {
     selected.dinner = null
     searches.lunch = ''
     searches.dinner = ''
+    textSuggestions.lunch = []
+    textSuggestions.dinner = []
     toast.success('Uloženo')
     await loadEntries()
   } catch (e: any) {
