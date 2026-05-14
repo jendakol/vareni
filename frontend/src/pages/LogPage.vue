@@ -77,50 +77,24 @@
           </button>
         </div>
 
-        <!-- Mode toggle -->
-        <div class="flex gap-2 mb-3">
-          <button @click="modes[meal.key] = 'recipe'"
-            class="px-3 py-1 rounded-full text-sm"
-            :class="modes[meal.key] === 'recipe' ? 'bg-orange-600 text-white' : 'bg-stone-100 text-stone-600'">
-            Z receptu
-          </button>
-          <button @click="modes[meal.key] = 'text'"
-            class="px-3 py-1 rounded-full text-sm"
-            :class="modes[meal.key] === 'text' ? 'bg-orange-600 text-white' : 'bg-stone-100 text-stone-600'">
-            Volný text
-          </button>
-        </div>
-
-        <!-- Recipe autocomplete -->
-        <div v-if="modes[meal.key] === 'recipe'" class="relative">
-          <input v-model="searches[meal.key]" @input="searchRecipes(meal.key)"
-            :placeholder="`Hledat recept...`"
+        <!-- Unified search: recipes + free-text history -->
+        <div class="relative">
+          <input v-model="inputs[meal.key]" @input="onInput(meal.key)" @blur="hideSuggestions(meal.key)"
+            placeholder="Co jste jedli?"
             class="w-full px-4 py-3 border border-stone-300 rounded-lg text-lg" />
-          <div v-if="selected[meal.key]" class="mt-2 flex items-center gap-2 bg-orange-50 px-3 py-2 rounded-lg">
-            <span class="text-orange-700 font-medium">{{ selected[meal.key]!.title }}</span>
-            <button @click="selected[meal.key] = null; searches[meal.key] = ''" class="text-stone-400 hover:text-red-600 ml-auto">✕</button>
+          <div v-if="selectedRecipe[meal.key]" class="mt-2 flex items-center gap-2 bg-orange-50 px-3 py-2 rounded-lg">
+            <span class="text-xs bg-orange-200 text-orange-800 px-2 py-0.5 rounded-full font-medium shrink-0">RECEPT</span>
+            <span class="text-orange-700 font-medium truncate">{{ selectedRecipe[meal.key]!.title }}</span>
+            <button @click="clearSelection(meal.key)" class="text-stone-400 hover:text-red-600 ml-auto shrink-0">✕</button>
           </div>
-          <ul v-if="suggestions[meal.key]?.length && !selected[meal.key]"
-            class="absolute z-10 left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-            <li v-for="r in suggestions[meal.key]" :key="r.id"
-              @click="selectRecipe(meal.key, r)"
-              class="px-4 py-2 hover:bg-orange-50 cursor-pointer text-stone-700">
-              {{ r.title }}
-            </li>
-          </ul>
-        </div>
-
-        <!-- Free text -->
-        <div v-else class="relative">
-          <input v-model="texts[meal.key]" @input="searchFreeText(meal.key)" @blur="hideTextSuggestions(meal.key)"
-            :placeholder="`Co jste měli k ${meal.dative}?`"
-            class="w-full px-4 py-3 border border-stone-300 rounded-lg text-lg" />
-          <ul v-if="textSuggestions[meal.key]?.length"
-            class="absolute z-10 left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
-            <li v-for="s in textSuggestions[meal.key]" :key="s"
-              @mousedown.prevent="selectFreeText(meal.key, s)"
-              class="px-4 py-2 hover:bg-orange-50 cursor-pointer text-stone-700">
-              {{ s }}
+          <ul v-if="suggestions[meal.key]?.length && !selectedRecipe[meal.key]"
+            class="absolute z-10 left-0 right-0 mt-1 bg-white border border-stone-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+            <li v-for="(s, i) in suggestions[meal.key]" :key="`${s.kind}-${i}`"
+              @mousedown.prevent="selectSuggestion(meal.key, s)"
+              class="px-4 py-2 hover:bg-orange-50 cursor-pointer flex items-center gap-2">
+              <span v-if="s.kind === 'recipe'" class="text-xs bg-orange-100 text-orange-700 px-2 py-0.5 rounded-full font-medium shrink-0">RECEPT</span>
+              <span v-else class="text-xs bg-stone-100 text-stone-500 px-2 py-0.5 rounded-full shrink-0">Z HISTORIE</span>
+              <span class="text-stone-700 truncate">{{ s.kind === 'recipe' ? s.recipe.title : s.text }}</span>
             </li>
           </ul>
         </div>
@@ -141,6 +115,10 @@ import { useToast } from 'vue-toastification'
 import { listPlan, createPlanEntry, updatePlanEntry, deletePlanEntry, suggestFreeText, type MealPlanEntry } from '../api/plan'
 import { listRecipes, type Recipe } from '../api/recipes'
 import { listUsers, type User } from '../api/auth'
+
+type Suggestion =
+  | { kind: 'recipe'; recipe: Recipe }
+  | { kind: 'history'; text: string }
 
 const toast = useToast()
 const route = useRoute()
@@ -234,72 +212,72 @@ async function removeEntry(id: string) {
 }
 
 const meals = [
-  { key: 'lunch', label: 'Oběd', dative: 'obědu' },
-  { key: 'dinner', label: 'Večeře', dative: 'večeři' },
+  { key: 'lunch', label: 'Oběd' },
+  { key: 'dinner', label: 'Večeře' },
 ]
 
-const modes = reactive<Record<string, 'recipe' | 'text'>>({ lunch: 'text', dinner: 'text' })
-const texts = reactive<Record<string, string>>({ lunch: '', dinner: '' })
-const searches = reactive<Record<string, string>>({ lunch: '', dinner: '' })
-const selected = reactive<Record<string, Recipe | null>>({ lunch: null, dinner: null })
-const suggestions = reactive<Record<string, Recipe[]>>({ lunch: [], dinner: [] })
-const textSuggestions = reactive<Record<string, string[]>>({ lunch: [], dinner: [] })
+const inputs = reactive<Record<string, string>>({ lunch: '', dinner: '' })
+const selectedRecipe = reactive<Record<string, Recipe | null>>({ lunch: null, dinner: null })
+const suggestions = reactive<Record<string, Suggestion[]>>({ lunch: [], dinner: [] })
 const whoAte = reactive<Record<string, string>>({ lunch: 'both', dinner: 'both' })
 const saving = ref(false)
 
 let debounceTimers: Record<string, ReturnType<typeof setTimeout>> = {}
 
-function searchRecipes(meal: string) {
+function onInput(meal: string) {
+  // Typing after a recipe was selected = user is editing, deselect
+  if (selectedRecipe[meal]) {
+    selectedRecipe[meal] = null
+  }
   clearTimeout(debounceTimers[meal])
   debounceTimers[meal] = setTimeout(async () => {
-    const q = searches[meal]
-    if (q.length < 2) {
+    const q = inputs[meal]?.trim()
+    if (!q || q.length < 2) {
       suggestions[meal] = []
       return
     }
-    const result = await listRecipes({ q })
-    suggestions[meal] = result.items
+    try {
+      const [recipesResult, history] = await Promise.all([
+        listRecipes({ q }),
+        suggestFreeText(q),
+      ])
+      suggestions[meal] = [
+        ...recipesResult.items.map((r): Suggestion => ({ kind: 'recipe', recipe: r })),
+        ...history.map((t): Suggestion => ({ kind: 'history', text: t })),
+      ]
+    } catch {
+      suggestions[meal] = []
+    }
   }, 300)
 }
 
-function selectRecipe(meal: string, recipe: Recipe) {
-  selected[meal] = recipe
-  searches[meal] = recipe.title
+function selectSuggestion(meal: string, s: Suggestion) {
+  if (s.kind === 'recipe') {
+    selectedRecipe[meal] = s.recipe
+    inputs[meal] = s.recipe.title
+  } else {
+    selectedRecipe[meal] = null
+    inputs[meal] = s.text
+  }
   suggestions[meal] = []
 }
 
-function searchFreeText(meal: string) {
-  clearTimeout(debounceTimers[`text_${meal}`])
-  debounceTimers[`text_${meal}`] = setTimeout(async () => {
-    const q = texts[meal]?.trim()
-    if (!q || q.length < 2) {
-      textSuggestions[meal] = []
-      return
-    }
-    try {
-      textSuggestions[meal] = await suggestFreeText(q)
-    } catch {
-      textSuggestions[meal] = []
-    }
-  }, 300)
+function clearSelection(meal: string) {
+  selectedRecipe[meal] = null
+  inputs[meal] = ''
 }
 
-function selectFreeText(meal: string, value: string) {
-  texts[meal] = value
-  textSuggestions[meal] = []
-}
-
-function hideTextSuggestions(meal: string) {
-  // Delay slightly so click/mousedown on suggestion still fires
-  setTimeout(() => { textSuggestions[meal] = [] }, 150)
+function hideSuggestions(meal: string) {
+  // Delay so mousedown on a suggestion fires before we hide
+  setTimeout(() => { suggestions[meal] = [] }, 150)
 }
 
 async function saveLog() {
   saving.value = true
   try {
     for (const meal of meals) {
-      const sel = selected[meal.key]
-      const txt = texts[meal.key]?.trim()
+      const sel = selectedRecipe[meal.key]
+      const txt = inputs[meal.key]?.trim()
       const who = whoAte[meal.key]
 
       const base: any = {
@@ -308,9 +286,9 @@ async function saveLog() {
         entry_type: 'logged',
       }
 
-      if (modes[meal.key] === 'recipe' && sel) {
+      if (sel) {
         base.recipe_id = sel.id
-      } else if (modes[meal.key] === 'text' && txt) {
+      } else if (txt) {
         base.free_text = txt
       } else {
         continue
@@ -324,14 +302,12 @@ async function saveLog() {
         await createPlanEntry({ ...base, for_user_id: who })
       }
     }
-    texts.lunch = ''
-    texts.dinner = ''
-    selected.lunch = null
-    selected.dinner = null
-    searches.lunch = ''
-    searches.dinner = ''
-    textSuggestions.lunch = []
-    textSuggestions.dinner = []
+    inputs.lunch = ''
+    inputs.dinner = ''
+    selectedRecipe.lunch = null
+    selectedRecipe.dinner = null
+    suggestions.lunch = []
+    suggestions.dinner = []
     toast.success('Uloženo')
     await loadEntries()
   } catch (e: any) {

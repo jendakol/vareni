@@ -10,5 +10,6 @@
 frontend/tsconfig.tsbuildinfo
 .idea/
 /models/
+/backups/
 tools/embedding-bench/models
 tools/embedding-bench/target/
