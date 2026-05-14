@@ -125,6 +125,62 @@ async fn list_recipes_search() {
 }
 
 #[tokio::test]
+async fn search_ignores_diacritics_and_case() {
+    let ctx = common::TestContext::new().await;
+    let (key, value) = ctx.auth_header_1();
+
+    // Create a recipe with Czech diacritics in the title
+    let payload = json!({
+        "title": "Palačinky se šlehačkou",
+        "source_type": "manual",
+        "sections": [
+            { "label": null, "sort_order": 0, "ingredients": [], "steps": [
+                { "step_order": 1, "instruction": "Udělej palačinky" }
+            ]}
+        ]
+    });
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/recipes")
+        .header("Content-Type", "application/json")
+        .header(&key, &value)
+        .body(Body::from(serde_json::to_string(&payload).unwrap()))
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+
+    // Search without diacritics — must still find it
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/recipes?q=palacinky")
+        .header(&key, &value)
+        .body(Body::empty())
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json["total"], 1,
+        "search without diacritics should find recipe"
+    );
+
+    // Search uppercase without diacritics — must still find it
+    let req = Request::builder()
+        .method("GET")
+        .uri("/api/recipes?q=SLEHACKOU")
+        .header(&key, &value)
+        .body(Body::empty())
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    let body = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&body).unwrap();
+    assert_eq!(
+        json["total"], 1,
+        "uppercase search without diacritics should find recipe"
+    );
+}
+
+#[tokio::test]
 async fn list_recipes_tag_filter() {
     let ctx = common::TestContext::new().await;
     create_recipe(&ctx).await; // tags: pasta, quick, Italian

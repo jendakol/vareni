@@ -280,9 +280,9 @@ pub async fn list(
         let sql = format!(
             "SELECT DISTINCT {RECIPE_COLUMNS} FROM recipes r
              {join}
-             WHERE (r.title ILIKE $1 OR r.description ILIKE $1
-               OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND i.name ILIKE $1)
-               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1))
+             WHERE (unaccent(r.title) ILIKE unaccent($1) OR unaccent(r.description) ILIKE unaccent($1)
+               OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND unaccent(i.name) ILIKE unaccent($1))
+               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND unaccent(rt.tag) ILIKE unaccent($1)))
                AND r.status = ANY($4)
              {order}
              LIMIT $2 OFFSET $3",
@@ -310,9 +310,9 @@ pub async fn list(
             .await?;
 
         let total = sqlx::query_scalar::<_, i64>(
-            "SELECT COUNT(*) FROM recipes r WHERE (r.title ILIKE $1 OR r.description ILIKE $1
-               OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND i.name ILIKE $1)
-               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND rt.tag ILIKE $1))
+            "SELECT COUNT(*) FROM recipes r WHERE (unaccent(r.title) ILIKE unaccent($1) OR unaccent(r.description) ILIKE unaccent($1)
+               OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND unaccent(i.name) ILIKE unaccent($1))
+               OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND unaccent(rt.tag) ILIKE unaccent($1)))
                AND r.status = ANY($2)",
         )
         .bind(&pattern)
