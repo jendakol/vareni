@@ -3,7 +3,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use tracing_subscriber::EnvFilter;
 
-use cooking_app::{AppState, config, create_router, metrics, push_notifier};
+use cooking_app::{AppState, config, create_router, metrics};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -22,8 +22,6 @@ async fn main() -> anyhow::Result<()> {
     let pool = PgPool::connect(&config.database_url).await?;
 
     sqlx::migrate!("./migrations").run(&pool).await?;
-
-    push_notifier::start_notifier(pool.clone(), config.push_notify_hour);
 
     metrics::spawn_gauge_refresh(pool.clone(), config.metrics_gauge_refresh_secs);
 

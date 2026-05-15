@@ -72,15 +72,11 @@ impl TestContext {
             jwt_secret: "test-secret-key-for-testing-12345".into(),
             jwt_expiry_hours: 24,
             base_url: "http://localhost:8080".into(),
-            push_notify_hour: 20,
             static_dir: "./static".into(),
             upload_dir: std::env::temp_dir()
                 .join(format!("cooking-test-{}", uuid::Uuid::new_v4()))
                 .to_string_lossy()
                 .into_owned(),
-            vapid_public_key: String::new(),
-            vapid_private_key: String::new(),
-            vapid_contact: "mailto:test@test.com".into(),
             embedding_model_dir: None,
             discovery_enabled: false,
             log_api_token: Some("test-log-token".into()),

@@ -99,9 +99,6 @@ Nastavení přes proměnné prostředí (soubor `.env`). Docker Compose nastaví
 | `JWT_SECRET`          | Tajný klíč pro JWT tokeny (min 32 znaků) | povinné             |
 | `JWT_EXPIRY_HOURS`    | Platnost tokenu v hodinách               | `720` (30 dní)      |
 | `BASE_URL`            | Veřejná URL aplikace                     | `http://localhost:8080` |
-| `VAPID_PUBLIC_KEY`    | VAPID klíč pro push notifikace           | volitelné           |
-| `VAPID_PRIVATE_KEY`   | VAPID privátní klíč                      | volitelné           |
-| `PUSH_NOTIFY_HOUR`    | Hodina pro připomínku večeře             | `20`                |
 | `EMBEDDING_MODEL_DIR` | Cesta k ONNX embedding modelu            | volitelné           |
 | `DISCOVERY_ENABLED`   | Povolení discovery                       | `true`              |
 

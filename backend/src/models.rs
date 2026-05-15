@@ -276,13 +276,6 @@ pub struct MealPlanHistoryQuery {
     pub days: Option<i64>,
 }
 
-// -- Push --
-
-#[derive(Debug, Deserialize)]
-pub struct PushSubscriptionRequest {
-    pub subscription: serde_json::Value,
-}
-
 // -- Public --
 
 #[derive(Debug, Serialize)]

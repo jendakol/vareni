@@ -16,7 +16,6 @@ pub mod embedding;
 pub mod error;
 pub mod metrics;
 pub mod models;
-pub mod push_notifier;
 pub mod routes;
 pub mod scraper;
 
@@ -74,9 +73,6 @@ pub fn create_router(state: AppState) -> Router {
             "/plan/{id}",
             put(routes::plan::update).delete(routes::plan::delete),
         )
-        // Push
-        .route("/push/subscribe", post(routes::push::subscribe))
-        .route("/push/unsubscribe", post(routes::push::unsubscribe))
         // Settings
         .route(
             "/settings/restrictions",

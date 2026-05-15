@@ -39,7 +39,6 @@ Two fixed users (Jenda + přítelkyně). No public registration. Auth via simple
 │   │   │   ├── ingest.rs
 │   │   │   ├── plan.rs
 │   │   │   ├── chat.rs
-│   │   │   ├── push.rs
 │   │   │   └── public.rs
 │   │   ├── models/
 │   │   ├── ai/
@@ -47,7 +46,6 @@ Two fixed users (Jenda + přítelkyně). No public registration. Auth via simple
 │   │   │   ├── ingest.rs      # recipe parsing prompts
 │   │   │   ├── plan.rs        # meal planning prompts
 │   │   │   └── chat.rs        # streaming chat + tool use
-│   │   ├── push/              # Web Push / VAPID
 │   │   └── db/                # sqlx queries
 │   ├── migrations/
 │   └── .sqlx/                 # offline query metadata for Docker builds
@@ -165,7 +163,6 @@ tokio-stream = "0.1"
 futures = "0.3"
 base64 = "0.22"
 scraper = "0.22"
-web-push = "0.10"
 
 [dev-dependencies]
 testcontainers = "0.24"
@@ -264,13 +261,6 @@ CREATE TABLE recipe_edit_sessions (
   recipe_id UUID REFERENCES recipes(id) ON DELETE CASCADE,
   user_id UUID REFERENCES users(id),
   messages JSONB NOT NULL DEFAULT '[]',
-  created_at TIMESTAMPTZ DEFAULT now()
-);
-
-CREATE TABLE push_subscriptions (
-  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
-  user_id UUID REFERENCES users(id) ON DELETE CASCADE,
-  subscription JSONB NOT NULL,
   created_at TIMESTAMPTZ DEFAULT now()
 );
 ```
@@ -482,14 +472,6 @@ POST   /api/plan/suggest    { prompt: string } → suggested entries (not saved)
 GET    /api/plan/history?days=90
 ```
 
-### Push Notifications
-```
-POST /api/push/subscribe      { subscription: object }
-POST /api/push/unsubscribe    { subscription: object }
-```
-
-Backend runs a tokio background task (not an external cron) that wakes daily at `PUSH_NOTIFY_HOUR`. For each user with a push subscription, if no `dinner` entry exists for today → send push notification: "Co jste dnes měli k večeři?". Notification click opens `/log`.
-
 ### Public
 ```
 GET /api/public/recipes/:slug   → recipe detail, no auth required
@@ -518,11 +500,11 @@ GET /r/:slug                    → returns index.html (Vue Router handles rende
                   - per-slot: quick-add buttons + editable prompt field
                   - "Navrhnout" button → /api/plan/suggest → show suggestions
 /r/:slug        → public read-only recipe view (no auth)
-/log            → quick meal log (opened from push notification)
+/log            → quick meal log
                   - pre-fills if today has confirmed entries
                   - two slots: oběd + večeře
                   - each: recipe autocomplete OR free-text toggle
-/settings       → dietary restrictions per user, push toggle, notify hour
+/settings       → dietary restrictions per user
 ```
 
 **State management:** Pinia
@@ -548,11 +530,7 @@ DATABASE_URL=postgresql://user:pass@host:5432/cookingapp
 ANTHROPIC_API_KEY=sk-ant-...
 JWT_SECRET=...
 JWT_EXPIRY_HOURS=720
-VAPID_PUBLIC_KEY=...
-VAPID_PRIVATE_KEY=...
-VAPID_CONTACT=mailto:you@example.com
 BASE_URL=https://your-domain.com
-PUSH_NOTIFY_HOUR=20
 STATIC_DIR=./static
 UPLOAD_DIR=./uploads
 SQLX_OFFLINE=true
@@ -574,9 +552,8 @@ Build in this sequence – each phase produces working, testable software:
 6. **Chat overlay** – SSE streaming, `update_recipe` tool, Vue overlay component
 7. **Meal plan** – calendar view, manual entries, history log
 8. **AI planning** – `/api/plan/suggest`, suggest → confirm flow in Vue
-9. **Push notifications** – service worker, VAPID, tokio background task, `/log` page
-10. **Public sharing** – slug generation, public route + API endpoint
-11. **Settings page** – dietary restrictions, notification preferences
+9. **Public sharing** – slug generation, public route + API endpoint
+10. **Settings page** – dietary restrictions, notification preferences
 
 ---
 
