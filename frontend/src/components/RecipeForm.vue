@@ -37,6 +37,13 @@
       <textarea v-model="form.description" rows="2" class="w-full px-4 py-3 border border-stone-300 rounded-lg" />
     </div>
 
+    <!-- Source link -->
+    <div>
+      <label class="block text-sm font-medium text-stone-600 mb-1">Odkaz na zdroj</label>
+      <input ref="sourceUrlInput" v-model.trim="form.source_url" type="url" inputmode="url" placeholder="https://…"
+        class="w-full px-4 py-3 border border-stone-300 rounded-lg" />
+    </div>
+
     <!-- Servings -->
     <div :class="isGuessed('servings') && 'ring-2 ring-amber-400 rounded-lg'">
       <label class="block text-sm font-medium text-stone-600 mb-1">Porcí
@@ -383,13 +390,21 @@ interface FormState {
   description: string
   servings: number | null
   emoji: string
+  /** '' means "no link" — sent verbatim, because '' is the backend's clear sentinel. */
+  source_url: string
+  /** How the recipe was captured ('manual' | 'photo' | 'url'); create path only. */
+  source_type: string | null
   tags: string[]
   sections: FormSection[]
   multiSection: boolean
 }
 
-/** Stable client-side key for draggable rows — never sent to the backend. */
-const newKey = (): string => crypto.randomUUID()
+/** Stable client-side key for draggable rows — never sent to the backend.
+ * randomUUID exists only in secure contexts (HTTPS/localhost); over plain HTTP
+ * (e.g. a phone on the LAN) it is undefined and would blank the whole form. */
+const newKey = (): string =>
+  globalThis.crypto?.randomUUID?.() ??
+  `k${Date.now().toString(36)}${Math.random().toString(36).slice(2)}`
 
 function blankSection(sortOrder = 0): FormSection {
   return {
@@ -435,6 +450,8 @@ function fromInitial(initial?: any): FormState {
       description: initial.description ?? '',
       servings: initial.servings ?? null,
       emoji: initial.emoji ?? '',
+      source_url: initial.source_url ?? '',
+      source_type: initial.source_type ?? null,
       tags: initial.tags ?? [],
       sections,
       multiSection,
@@ -448,6 +465,8 @@ function fromInitial(initial?: any): FormState {
     description: initial?.description ?? '',
     servings: initial?.servings ?? null,
     emoji: initial?.emoji ?? '',
+    source_url: initial?.source_url ?? '',
+    source_type: initial?.source_type ?? null,
     tags: initial?.tags ?? [],
     sections: [section0],
     multiSection: false,
@@ -597,15 +616,19 @@ function confirmDeleteSection(idx: number) {
 
 // ─── Submit handler ──────────────────────────────────────────────────────────
 
-function handleSubmit() {
-  // Note: source_type and source_url are intentionally omitted from this payload.
-  // UpdateRecipeRequest (backend/src/models.rs) does not include those fields,
-  // so they cannot be overwritten via PUT — the DB values are always preserved.
-  const payload = {
+function toPayload() {
+  return {
     title: form.title,
-    description: form.description || null,
+    // Sent verbatim, never `|| null`: the backend reads '' as "clear this field"
+    // and null as "keep the stored value". Coercing '' to null here would make
+    // clearing impossible through the UI no matter what the API allows.
+    description: form.description,
     servings: form.servings,
-    emoji: form.emoji || null,
+    emoji: form.emoji,
+    source_url: form.source_url,
+    // Ignored by UpdateRecipeRequest; matters on the create path so a web
+    // import is not stored as 'manual'.
+    source_type: form.source_type,
     tags: form.tags,
     sections: form.sections.map((s, idx) => ({
       id: s.id,
@@ -619,7 +642,6 @@ function handleSubmit() {
       ingredients: s.ingredients
         .filter(i => i.name.trim() !== '')
         .map(i => ({
-          // _key is UI-only — not sent to backend
           name: i.name,
           amount: i.amount,
           unit: i.unit || null,
@@ -628,14 +650,41 @@ function handleSubmit() {
       steps: s.steps
         .filter(st => st.instruction.trim() !== '')
         .map((st, i) => ({
-          // _key is UI-only — not sent to backend
           step_order: i + 1,
           instruction: st.instruction,
         })),
     })),
   }
-  emit('save', payload)
 }
+
+function handleSubmit() {
+  emit('save', toPayload())
+}
+
+// ─── Unsaved-changes tracking (consumed by RecipeDetailPage's route guard) ───
+
+const savedSnapshot = ref(JSON.stringify(toPayload()))
+const dirty = computed(() => JSON.stringify(toPayload()) !== savedSnapshot.value)
+
+/**
+ * Re-baseline after a successful save. Pass the payload that was actually
+ * submitted: baselining live form state instead would mark keystrokes typed
+ * *during* the request as already-saved, and the discard guard would then let
+ * them go without asking.
+ */
+function markSaved(saved?: unknown) {
+  savedSnapshot.value = JSON.stringify(saved ?? toPayload())
+}
+
+const sourceUrlInput = ref<HTMLInputElement | null>(null)
+
+/** Lets the detail page's "+ přidat odkaz" affordance land the caret in the field. */
+function focusSourceUrl() {
+  sourceUrlInput.value?.focus()
+  sourceUrlInput.value?.scrollIntoView({ block: 'center' })
+}
+
+defineExpose({ dirty, markSaved, focusSourceUrl })
 
 // ─── Watch for external initial prop changes ─────────────────────────────────
 // Gate on id change only — a deep watch would clobber in-progress edits on every
@@ -647,6 +696,7 @@ watch(
   (newId, oldId) => {
     if (newId !== oldId) {
       Object.assign(form, fromInitial(props.initial))
+      savedSnapshot.value = JSON.stringify(toPayload())
     }
   },
 )

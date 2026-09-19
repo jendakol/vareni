@@ -18,6 +18,7 @@ pub async fn create(
     auth: AuthUser,
     Json(body): Json<CreateRecipeRequest>,
 ) -> AppResult<(StatusCode, Json<RecipeDetail>)> {
+    // source_url is validated in db::recipes::create — the actual write sink.
     let recipe = db::recipes::create(&state.pool, auth.user_id, &body).await?;
     Ok((StatusCode::CREATED, Json(recipe)))
 }
@@ -70,6 +71,7 @@ pub async fn update(
     Path(id): Path<Uuid>,
     Json(body): Json<UpdateRecipeRequest>,
 ) -> AppResult<Json<RecipeDetail>> {
+    // source_url is validated in db::recipes::update — the actual write sink.
     let recipe = db::recipes::update(&state.pool, id, &body)
         .await?
         .ok_or(AppError::NotFound)?;

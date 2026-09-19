@@ -20,7 +20,11 @@
       </div>
     </nav>
     <main class="max-w-3xl mx-auto px-4 py-6">
-      <router-view />
+      <router-view v-slot="{ Component }">
+        <KeepAlive :include="['RecipeListPage']">
+          <component :is="Component" />
+        </KeepAlive>
+      </router-view>
     </main>
   </div>
 </template>

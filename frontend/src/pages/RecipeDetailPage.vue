@@ -5,17 +5,17 @@
       <div class="flex items-start justify-between mb-4">
         <div class="flex items-center gap-2 flex-wrap">
           <h1 class="text-2xl font-bold text-stone-800">
-            <span v-if="recipe.emoji" class="mr-1">{{ recipe.emoji }}</span>{{ recipe.title }}
+            <span v-if="recipe.emoji" class="mr-1 text-4xl sm:text-2xl">{{ recipe.emoji }}</span>{{ recipe.title }}
           </h1>
-          <span v-if="recipe.status === 'discovered'" class="text-xs bg-green-100 text-green-700 rounded-full px-2 py-1">
+          <span v-if="recipe.status === 'discovered'" class="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-1">
             Objevený ({{ Math.round((recipe.discovery_score || 0) * 100) }}%)
           </span>
-          <span v-if="recipe.status === 'tested'" class="text-xs bg-blue-100 text-blue-700 rounded-full px-2 py-1">
+          <span v-if="recipe.status === 'tested'" class="text-xs bg-green-100 text-green-700 rounded-full px-2 py-1">
             Vyzkoušeno
           </span>
         </div>
         <div class="flex items-center gap-1">
-          <button @click="editing = true" title="Upravit"
+          <button @click="startEdit" title="Upravit"
             class="p-2 text-stone-400 hover:text-stone-700 rounded-lg hover:bg-stone-100">
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 3a2.85 2.85 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/><path d="m15 5 4 4"/></svg>
           </button>
@@ -30,15 +30,26 @@
         </div>
       </div>
 
+      <div class="mb-4 text-sm">
+        <a v-if="safeSourceUrl" :href="safeSourceUrl" target="_blank" rel="noopener noreferrer"
+          class="inline-flex items-center gap-1 text-stone-500 hover:text-orange-600">
+          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
+          Zdroj: {{ sourceDomain }} ↗
+        </a>
+        <button v-else @click="addSourceLink" class="text-stone-400 hover:text-orange-600">
+          + přidat odkaz
+        </button>
+      </div>
+
       <div class="flex items-center gap-2 mb-4 flex-wrap">
         <template v-if="recipe.status === 'discovered'">
           <button @click="handleStatus('saved')"
-            class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
+            class="px-5 py-2.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium inline-flex items-center gap-2">
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             Uložit
           </button>
           <button @click="handleStatus('rejected')"
-            class="px-5 py-2.5 bg-stone-200 text-stone-700 rounded-lg hover:bg-stone-300 font-medium">
+            class="px-5 py-2.5 border border-red-300 text-red-600 rounded-lg hover:bg-red-50 font-medium">
             Odmítnout
           </button>
           <button @click="handleStatus('rejected_similar')"
@@ -49,12 +60,12 @@
         </template>
         <template v-else>
           <button @click="startCooking"
-            class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
+            class="px-5 py-2.5 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium inline-flex items-center gap-2">
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polygon points="5 3 19 12 5 21 5 3"/></svg>
             Vařit
           </button>
           <button v-if="recipe.status === 'saved'" @click="markTested"
-            class="px-5 py-2.5 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium inline-flex items-center gap-2">
+            class="px-5 py-2.5 bg-green-600 text-white rounded-lg hover:bg-green-700 font-medium inline-flex items-center gap-2">
             <svg class="w-5 h-5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>
             Vyzkoušeno
           </button>
@@ -63,7 +74,8 @@
 
       <p v-if="recipe.description" class="text-stone-600 mb-4">{{ recipe.description }}</p>
 
-      <div class="flex gap-5 text-sm text-stone-500 mb-4">
+      <div v-if="recipe.prep_time_min || recipe.cook_time_min || recipe.servings"
+        class="flex gap-5 text-sm text-stone-500 mb-4">
         <span v-if="recipe.prep_time_min" class="flex items-center gap-1" title="Příprava">
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>
           {{ recipe.prep_time_min }} min
@@ -76,11 +88,6 @@
           <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 2v7c0 1.1.9 2 2 2h4a2 2 0 0 0 2-2V2"/><path d="M7 2v20"/><path d="M21 15V2a5 5 0 0 0-5 5v6c0 1.1.9 2 2 2h3Zm0 0v7"/></svg>
           {{ recipe.servings }} {{ recipe.servings === 1 ? 'porce' : recipe.servings! < 5 ? 'porce' : 'porcí' }}
         </span>
-        <a v-if="recipe.source_url" :href="recipe.source_url" target="_blank"
-          class="flex items-center gap-1 hover:text-orange-600" title="Zdroj receptu">
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M18 13v6a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h6"/><polyline points="15 3 21 3 21 9"/><line x1="10" y1="14" x2="21" y2="3"/></svg>
-          {{ sourceDomain }}
-        </a>
       </div>
 
       <TagChips v-if="recipe.tags?.length" :tags="recipe.tags" class="mb-6" />
@@ -106,9 +113,9 @@
     <div v-else>
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold text-stone-700">Upravit recept</h2>
-        <button @click="editing = false" class="text-stone-500 hover:text-stone-700 text-sm">← Zpět</button>
+        <button @click="leaveEdit" class="text-stone-500 hover:text-stone-700 text-sm">← Zpět</button>
       </div>
-      <RecipeForm :initial="editData" @save="handleUpdate" />
+      <RecipeForm ref="formRef" :initial="editData" @save="handleUpdate" />
     </div>
 
     <CookingMode v-if="cooking" :sections="recipe.sections || []" @close="cooking = false" />
@@ -122,8 +129,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
+import { useRoute, useRouter, onBeforeRouteUpdate, onBeforeRouteLeave } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import * as api from '../api/recipes'
 import { updateRecipeStatus } from '../api/recipes'
@@ -134,10 +141,12 @@ import StepList from '../components/StepList.vue'
 import CookingMode from '../components/CookingMode.vue'
 import ChatOverlay from '../components/ChatOverlay.vue'
 import RecipeForm from '../components/RecipeForm.vue'
+import { useRecipeStore } from '../stores/recipes'
 
 const route = useRoute()
 const router = useRouter()
 const toast = useToast()
+const store = useRecipeStore()
 const recipe = ref<Recipe | null>(null)
 
 const cookTimeLabel = computed(() => {
@@ -155,8 +164,76 @@ const cookTimeLabel = computed(() => {
 })
 const cooking = ref(false)
 const showChat = ref(false)
-const editing = ref(false)
 const loadError = ref(false)
+const formRef = ref<InstanceType<typeof RecipeForm> | null>(null)
+
+// Edit mode lives in the URL so entering it pushes a history entry — otherwise
+// browser Back skips the detail entirely and lands on the list.
+const editing = computed(() => route.query.edit === '1')
+/** True only when *this* page pushed the ?edit=1 entry, so leaveEdit knows
+ * whether router.back() has somewhere to land or whether it must replace(). */
+let pushedEdit = false
+
+function startEdit() {
+  pushedEdit = true
+  return router.push({ query: { ...route.query, edit: '1' } })
+}
+
+/** Spec asks the add-link affordance to open the form with the caret already
+ * in the source field, so the user is not left hunting for it. */
+async function addSourceLink() {
+  await startEdit()
+  await nextTick()
+  formRef.value?.focusSourceUrl()
+}
+
+function leaveEdit() {
+  // Pop the entry we pushed so Back doesn't land on a second, textually
+  // identical detail entry (which would look like Back does nothing).
+  // A deep link straight into ?edit=1 never pushed one, so fall back to replace.
+  if (pushedEdit) router.back()
+  else router.replace({ query: { ...route.query, edit: undefined } })
+}
+
+function confirmDiscard(): boolean {
+  if (!formRef.value?.dirty) return true
+  return window.confirm('Máš rozepsané změny, které se neuloží. Opravdu odejít?')
+}
+
+// ?edit=1 -> {} is a query-only change on the SAME route record, and
+// onBeforeRouteLeave does not fire for those — this is the hook that runs.
+// Also guards a same-record id change (e.g. a future ?edit=1 -> ?edit=1 on a
+// different recipe id), not just the edit flag itself.
+onBeforeRouteUpdate((to) => {
+  const stillEditing = to.params.id === route.params.id && to.query.edit === '1'
+  if (editing.value && !stillEditing && !confirmDiscard()) return false
+})
+
+// Covers navigating away from the detail altogether while still editing.
+onBeforeRouteLeave(() => {
+  if (editing.value && !confirmDiscard()) return false
+})
+
+// Reset only once we are actually out of edit mode — if the guard cancels
+// the navigation we are still editing and the pushed entry still exists.
+watch(editing, (v) => { if (!v) pushedEdit = false })
+
+/**
+ * Output guard at the sink. The backend allowlists http(s) on every writer,
+ * but it was added to a database that already had rows, and nothing re-checks
+ * those on read — a stored `javascript:` URL would execute on click. Input
+ * validation cannot cover data that predates it, so the href is gated here too.
+ */
+const safeSourceUrl = computed(() => {
+  const raw = recipe.value?.source_url
+  if (!raw) return null
+  try {
+    const p = new URL(raw).protocol
+    return p === 'http:' || p === 'https:' ? raw : null
+  } catch {
+    return null
+  }
+})
 
 const sourceDomain = computed(() => {
   if (!recipe.value?.source_url) return ''
@@ -171,10 +248,17 @@ const editData = computed(() => {
   if (!recipe.value) return null
   // Pass the full recipe shape to RecipeForm — it reads sections[] natively (Phase 3+)
   return {
+    id: recipe.value.id,
     title: recipe.value.title,
     description: recipe.value.description,
     emoji: recipe.value.emoji,
     servings: recipe.value.servings,
+    // safeSourceUrl, not the raw column: a legacy row holding a non-http(s)
+    // URL would otherwise prefill the form, get sent back verbatim, and be
+    // rejected by the backend -- blocking every edit of that recipe until the
+    // user works out they have to clear a field they cannot even see.
+    source_url: safeSourceUrl.value ?? '',
+    source_type: recipe.value.source_type,
     tags: recipe.value.tags || [],
     sections: recipe.value.sections || [],
   }
@@ -197,6 +281,12 @@ async function handleStatus(status: string) {
   if (status === 'rejected_similar' && !confirm('Odmítnout tento recept a podobné v budoucnu?')) return
   try {
     await updateRecipeStatus(recipe.value.id, status)
+    // These buttons only exist for a discovered recipe, and saved/rejected/
+    // rejected_similar all leave that filter — so the card must go. Without
+    // this the list keeps showing it as discovered, the badge disagrees with
+    // the list, and the offset the next page is fetched from is one too high,
+    // which drops a recipe nobody ever sees.
+    store.removeRecipe(recipe.value.id)
     const msg = status === 'saved' ? 'Recept uložen' : 'Recept odmítnut'
     toast.success(msg)
     router.push({ path: '/recipes', query: { tab: 'discovered' } })
@@ -210,6 +300,7 @@ async function markTested() {
   try {
     await updateRecipeStatus(recipe.value.id, 'tested')
     recipe.value.status = 'tested'
+    store.patchRecipe(recipe.value.id, { status: 'tested' })
     toast.success('Recept označen jako vyzkoušený')
   } catch (e: any) {
     toast.error(e.message || 'Nepodařilo se změnit stav')
@@ -229,10 +320,22 @@ async function handleShare() {
 
 async function handleUpdate(data: any) {
   if (!recipe.value) return
+  // A stored link that fails the scheme check is hidden from both the view and
+  // the form, so the form hands back '' — which the backend reads as "clear
+  // this column". Saving an unrelated field would then delete it without the
+  // user ever knowing it was there. Ask instead.
+  if (data.source_url === '' && recipe.value.source_url && !safeSourceUrl.value) {
+    if (!confirm('Uložený odkaz na zdroj je neplatný a při uložení se odstraní. Pokračovat?')) return
+  }
   try {
-    // RecipeForm (Phase 3+) submits the full sections-based payload directly
-    await api.updateRecipe(recipe.value.id, data)
-    editing.value = false
+    const updated = await api.updateRecipe(recipe.value.id, data)
+    // Patch the cached list instead of letting it refetch: a refetch from page 1
+    // would drop the user at the top of a 20-card list after Back.
+    store.patchRecipe(recipe.value.id, updated)
+    // Re-baseline before leaving edit mode, so the discard guard sees a clean
+    // form and does not prompt for changes that were just saved.
+    formRef.value?.markSaved(data)
+    leaveEdit()
     toast.success('Recept uložen')
     await loadRecipe()
   } catch (e: any) {
@@ -253,6 +356,7 @@ async function handleDelete() {
   if (!confirm(`Smazat recept „${recipe.value.title}"? ${summary} Akce je nevratná.`)) return
   try {
     await api.deleteRecipe(recipe.value.id)
+    store.removeRecipe(recipe.value.id)
     toast.success('Recept smazán')
     router.push('/recipes')
   } catch (e: any) {
@@ -260,7 +364,14 @@ async function handleDelete() {
   }
 }
 
-function refreshRecipe() { loadRecipe() }
+// The chat can edit the recipe, so the cached list entry has to follow it like
+// every other mutation does — otherwise the list shows the pre-chat version,
+// and a title change under an active search can even shift the server's result
+// set out from under the paging offset.
+async function refreshRecipe() {
+  await loadRecipe()
+  if (recipe.value) store.patchRecipe(recipe.value.id, recipe.value)
+}
 
 onMounted(loadRecipe)
 </script>

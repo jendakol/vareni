@@ -2,10 +2,16 @@
   <div>
     <div class="flex items-center justify-between mb-6">
       <h1 class="text-2xl font-bold text-stone-800">Recepty</h1>
-      <router-link to="/recipes/new"
-        class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">
-        + Nový recept
-      </router-link>
+      <div class="flex gap-2">
+        <router-link to="/recipes/discover"
+          class="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 font-medium">
+          ✨ Objevit
+        </router-link>
+        <router-link to="/recipes/new"
+          class="px-4 py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium">
+          + Nový recept
+        </router-link>
+      </div>
     </div>
 
     <!-- Tab toggle -->
@@ -15,22 +21,7 @@
         :class="activeTab === tab.key ? 'bg-orange-600 text-white' : 'bg-stone-100 text-stone-600 hover:bg-stone-200'">
         {{ tab.label }}
         <span v-if="tab.key === 'discovered' && discoveredCount > 0"
-          class="ml-1 bg-orange-200 text-orange-800 rounded-full px-2 text-xs">{{ discoveredCount }}</span>
-      </button>
-    </div>
-
-    <!-- Discover section -->
-    <div class="mb-6 space-y-2 sm:space-y-0 sm:flex sm:gap-2">
-      <input v-model="discoverPrompt" placeholder="Najdi nové recepty... (např. 'ryba', 'těstoviny', 'rychlá večeře')"
-        class="w-full sm:flex-1 px-4 py-2 border border-stone-300 rounded-lg"
-        @keyup.enter="handleDiscover" />
-      <button v-if="!discovering" @click="handleDiscover"
-        class="w-full sm:w-auto px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700">
-        Objevit nové
-      </button>
-      <button v-else @click="cancelDiscover"
-        class="w-full sm:w-auto px-4 py-2 bg-red-500 text-white rounded-lg hover:bg-red-600">
-        Zrušit
+          class="ml-1 bg-blue-200 text-blue-800 rounded-full px-2 text-xs">{{ discoveredCount }}</span>
       </button>
     </div>
 
@@ -50,28 +41,36 @@
       </div>
     </template>
 
-    <div v-if="store.loading" class="text-center text-stone-500 py-8">Načítám...</div>
-    <div v-else-if="store.error" class="text-center py-8">
+    <div v-if="store.loading && store.recipes.length === 0" class="text-center text-stone-500 py-8">Načítám...</div>
+    <div v-else-if="store.error && store.recipes.length === 0" class="text-center py-8">
       <p class="text-red-600 font-medium">Chyba při načítání receptů</p>
       <button @click="fetchRecipes()" class="mt-2 text-orange-600 hover:underline text-sm">Zkusit znovu</button>
     </div>
-    <div v-else-if="store.recipes.length === 0" class="text-center text-stone-400 py-8">
+    <div v-else-if="!store.loading && store.recipes.length === 0" class="text-center text-stone-400 py-8">
       {{ activeTab === 'mine' ? 'Žádné recepty' : activeTab === 'discovered' ? 'Žádné objevené recepty' : 'Žádné odmítnuté recepty' }}
     </div>
     <div v-else class="space-y-3">
       <RecipeCard v-for="recipe in store.recipes" :key="recipe.id" :recipe="recipe"
         @status="handleStatusChange" />
+      <div ref="sentinel" class="h-px"></div>
+      <p v-if="store.loadingMore" class="text-center text-stone-500 py-4">Načítám…</p>
+      <div v-else-if="store.moreError" class="text-center py-4">
+        <p class="text-red-600 text-sm">Další recepty se nepodařilo načíst</p>
+        <button @click="store.fetchMore()" class="mt-1 text-orange-600 hover:underline text-sm">Zkusit znovu</button>
+      </div>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, watch, onMounted } from 'vue'
+// Required for <KeepAlive :include="['RecipeListPage']"> in App.vue to match.
+defineOptions({ name: 'RecipeListPage' })
+
+import { ref, watch, nextTick, onMounted, onActivated, onUnmounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { useRecipeStore } from '../stores/recipes'
 import { updateRecipeStatus } from '../api/recipes'
-import { discover } from '../api/discover'
 import RecipeCard from '../components/RecipeCard.vue'
 
 const route = useRoute()
@@ -86,10 +85,7 @@ const validTabs = ['mine', 'discovered', 'rejected'] as const
 type Tab = typeof validTabs[number]
 const initialTab = validTabs.includes(route.query.tab as Tab) ? (route.query.tab as Tab) : 'mine'
 const activeTab = ref<Tab>(initialTab)
-const discoverPrompt = ref('')
-const discovering = ref(false)
 const discoveredCount = ref(0)
-let discoverAbort: AbortController | null = null
 
 const tabs = [
   { key: 'mine' as const, label: 'Moje recepty' },
@@ -102,6 +98,15 @@ const sorts = [
   { value: 'least_cooked', label: 'Dlouho nevařené' },
   { value: 'prep_time', label: 'Nejrychlejší' },
 ]
+
+const sentinel = ref<HTMLElement | null>(null)
+let observer: IntersectionObserver | null = null
+
+// Re-observe whenever the sentinel is created or destroyed by a v-if branch flip.
+watch(sentinel, (el, prev) => {
+  if (prev) observer?.unobserve(prev)
+  if (el) observer?.observe(el)
+})
 
 watch(activeTab, (tab) => {
   router.replace({ query: tab === 'mine' ? {} : { tab } })
@@ -116,7 +121,7 @@ function statusForTab(): string | undefined {
 }
 
 function fetchRecipes() {
-  store.fetch({
+  return store.fetch({
     q: activeTab.value === 'mine' ? (search.value || undefined) : undefined,
     sort: activeTab.value === 'mine' ? sort.value : undefined,
     status: statusForTab(),
@@ -137,71 +142,16 @@ async function fetchDiscoveredCount() {
   }
 }
 
-function cancelDiscover() {
-  if (discoverAbort) {
-    discoverAbort.abort()
-    discoverAbort = null
-  }
-  discovering.value = false
-  toast.dismiss('discover-progress')
-  toast.info('Hledání zrušeno')
-}
-
-async function handleDiscover() {
-  discovering.value = true
-  discoverAbort = new AbortController()
-  toast.info('Hledám nové recepty...', { timeout: false, id: 'discover-progress' })
-  try {
-    const result = await discover({
-      prompt: discoverPrompt.value || undefined,
-      count: 5,
-    }, discoverAbort.signal)
-    toast.dismiss('discover-progress')
-
-    const found = result.discovered.length
-    const sk = result.skipped
-    const skippedTotal = sk.duplicate + sk.restricted + sk.low_score + sk.similar_to_rejected + (sk.failed || 0)
-    const parts: string[] = []
-    if (sk.duplicate > 0) parts.push(`${sk.duplicate} duplicit`)
-    if (sk.restricted > 0) parts.push(`${sk.restricted} omezení`)
-    if (sk.low_score > 0) parts.push(`${sk.low_score} nízké skóre`)
-    if (sk.similar_to_rejected > 0) parts.push(`${sk.similar_to_rejected} podobné odmítnutým`)
-    if (sk.failed) parts.push(`${sk.failed} chyba zpracování`)
-
-    if (found > 0) {
-      let msg = `Nalezeno ${found} ${found === 1 ? 'nový recept' : found < 5 ? 'nové recepty' : 'nových receptů'}`
-      if (skippedTotal > 0) msg += ` (přeskočeno ${skippedTotal}: ${parts.join(', ')})`
-      toast.success(msg)
-      activeTab.value = 'discovered'
-      discoverPrompt.value = ''
-      fetchRecipes()
-    } else {
-      let msg = 'Nenalezeno nic nového'
-      if (skippedTotal > 0) msg += ` (přeskočeno ${skippedTotal}: ${parts.join(', ')})`
-      toast.info(msg)
-    }
-
-    if (result.errors.length > 0) {
-      const errorSites = result.errors.map(e => e.site).join(', ')
-      toast.warning(`Chyby při scrapování: ${errorSites}`)
-    }
-
-    await fetchDiscoveredCount()
-  } catch (e: any) {
-    toast.dismiss('discover-progress')
-    if (e.name !== 'AbortError') {
-      toast.error(e.message || 'Nepodařilo se objevit recepty')
-    }
-  } finally {
-    discovering.value = false
-    discoverAbort = null
-  }
-}
-
 async function handleStatusChange(id: string, status: string) {
   try {
-    await updateRecipeStatus(id, status)
-    await fetchRecipes()
+    const updated = await updateRecipeStatus(id, status)
+    // Patch or drop the single card. A refetch here would reset the scroll
+    // position, which is the one thing this page exists to preserve.
+    if (statusForTab()?.split(',').includes(status)) {
+      store.patchRecipe(id, updated)
+    } else {
+      store.removeRecipe(id)
+    }
     await fetchDiscoveredCount()
     if (status === 'saved') toast.success('Recept uložen')
     else if (status === 'discovered') toast.success('Recept obnoven')
@@ -212,7 +162,39 @@ async function handleStatusChange(id: string, status: string) {
 }
 
 onMounted(() => {
+  observer = new IntersectionObserver(
+    (entries) => { if (entries[0].isIntersecting) store.fetchMore() },
+    { rootMargin: '400px' },
+  )
+  if (sentinel.value) observer.observe(sentinel.value)
   fetchRecipes()
+})
+
+// KeepAlive means setup() never runs again, so the tab encoded in the URL has to
+// be re-read here — otherwise /recipes?tab=discovered changes the address bar and
+// nothing else, and the URL then describes a screen the user is not looking at.
+onActivated(() => {
+  const tab = validTabs.includes(route.query.tab as Tab) ? (route.query.tab as Tab) : 'mine'
+  if (tab !== activeTab.value) {
+    activeTab.value = tab
+    fetchRecipes()
+  } else if (store.stale) {
+    // A recipe was created elsewhere; its position under the current sort is
+    // unknown, so this is the one mutation that cannot be patched in — the list
+    // reloads from page 1 and the earlier scroll offset stops meaning anything.
+    //
+    // The router restores that offset on a nextTick after this hook, and the
+    // reload empties the list inside the same flush, so the restore would clamp
+    // against a one-line spinner and dump the user at the top anyway. Go there
+    // deliberately once the new first page has rendered, rather than arriving by
+    // accident mid-restore.
+    fetchRecipes().then(() => nextTick()).then(() => window.scrollTo({ top: 0 }))
+  }
   fetchDiscoveredCount()
+})
+
+onUnmounted(() => {
+  observer?.disconnect()
+  observer = null
 })
 </script>

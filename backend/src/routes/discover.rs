@@ -426,6 +426,9 @@ async fn process_candidate(
         })
         .collect();
 
+    // The scraped URL lands in the same <a href> as a hand-typed one, so it
+    // goes through the same gate — enforced inside create_discovered, the
+    // write sink, rather than here.
     let recipe = db::recipes::create_discovered(
         &state.pool,
         owner_id,
@@ -439,8 +442,7 @@ async fn process_candidate(
         &tags,
         &sections,
     )
-    .await
-    .map_err(|e| anyhow::anyhow!("Failed to insert discovered recipe: {e}"))?;
+    .await?;
 
     Ok(CandidateResult::Discovered(Box::new(recipe)))
 }

@@ -29,6 +29,7 @@ pub async fn create(
             "Recipe must have at least one section".into(),
         ));
     }
+    let source_url = crate::validation::normalize_source_url(req.source_url.as_deref())?;
 
     let mut tx = pool.begin().await?;
 
@@ -36,7 +37,7 @@ pub async fn create(
         r#"
         INSERT INTO recipes
           (owner_id, title, description, servings, emoji, source_type, source_url, status)
-        VALUES ($1, $2, $3, $4, $5, $6, $7, COALESCE($8, 'saved'))
+        VALUES ($1, $2, NULLIF($3::text, ''), $4, NULLIF($5::text, ''), $6, NULLIF($7::text, ''), COALESCE($8, 'saved'))
         RETURNING id
         "#,
     )
@@ -46,7 +47,7 @@ pub async fn create(
     .bind(req.servings)
     .bind(&req.emoji)
     .bind(req.source_type.as_deref().unwrap_or("manual"))
-    .bind(&req.source_url)
+    .bind(source_url)
     .bind(Option::<String>::None) // status default
     .fetch_one(&mut *tx)
     .await?;
@@ -233,6 +234,29 @@ pub async fn list(
         + COALESCE((SELECT SUM(cook_time_min) FROM recipe_sections WHERE recipe_id = r.id), 0)\
     ) NULLS LAST";
 
+    // One definition for all three branches (tag / q / plain) — they used to carry
+    // identical copies of both.
+    let join = if sort == "least_cooked" {
+        "LEFT JOIN (
+            SELECT recipe_id, MAX(date) AS last_date
+            FROM meal_plan_entries WHERE recipe_id IS NOT NULL
+            GROUP BY recipe_id
+         ) mp ON mp.recipe_id = r.id"
+    } else {
+        ""
+    };
+
+    let criterion = match sort {
+        "least_cooked" => "mp.last_date ASC NULLS FIRST, r.title ASC".to_string(),
+        "prep_time" => format!("{prep_time_order}, r.title ASC"),
+        _ => "r.created_at DESC".to_string(),
+    };
+
+    // Tested first, then the chosen criterion, then r.id as a unique tiebreaker:
+    // without it the row order inside a tie group is undefined and LIMIT/OFFSET
+    // silently duplicates or skips rows between pages.
+    let order = format!("ORDER BY (r.status = 'tested') DESC, {criterion}, r.id DESC");
+
     let (items, total) = if let Some(tag_filter) = tag {
         let sql = format!(
             "SELECT {RECIPE_COLUMNS} FROM recipes r
@@ -240,21 +264,7 @@ pub async fn list(
              {join}
              WHERE rt.tag = $1 AND r.status = ANY($4)
              {order}
-             LIMIT $2 OFFSET $3",
-            join = if sort == "least_cooked" {
-                "LEFT JOIN (
-                    SELECT recipe_id, MAX(date) AS last_date
-                    FROM meal_plan_entries WHERE recipe_id IS NOT NULL
-                    GROUP BY recipe_id
-                 ) mp ON mp.recipe_id = r.id"
-            } else {
-                ""
-            },
-            order = match sort {
-                "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" => &format!("ORDER BY {prep_time_order}, r.title ASC"),
-                _ => "ORDER BY r.updated_at DESC",
-            },
+             LIMIT $2 OFFSET $3"
         );
         let items = sqlx::query_as::<_, Recipe>(&sql)
             .bind(tag_filter)
@@ -278,28 +288,14 @@ pub async fn list(
     } else if let Some(search) = q {
         let pattern = format!("%{search}%");
         let sql = format!(
-            "SELECT DISTINCT {RECIPE_COLUMNS} FROM recipes r
+            "SELECT {RECIPE_COLUMNS} FROM recipes r
              {join}
              WHERE (unaccent(r.title) ILIKE unaccent($1) OR unaccent(r.description) ILIKE unaccent($1)
                OR EXISTS (SELECT 1 FROM recipe_ingredients ri JOIN ingredients i ON ri.ingredient_id = i.id WHERE ri.recipe_id = r.id AND unaccent(i.name) ILIKE unaccent($1))
                OR EXISTS (SELECT 1 FROM recipe_tags rt WHERE rt.recipe_id = r.id AND unaccent(rt.tag) ILIKE unaccent($1)))
                AND r.status = ANY($4)
              {order}
-             LIMIT $2 OFFSET $3",
-            join = if sort == "least_cooked" {
-                "LEFT JOIN (
-                    SELECT recipe_id, MAX(date) AS last_date
-                    FROM meal_plan_entries WHERE recipe_id IS NOT NULL
-                    GROUP BY recipe_id
-                 ) mp ON mp.recipe_id = r.id"
-            } else {
-                ""
-            },
-            order = match sort {
-                "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" => &format!("ORDER BY {prep_time_order}, r.title ASC"),
-                _ => "ORDER BY r.updated_at DESC",
-            },
+             LIMIT $2 OFFSET $3"
         );
         let items = sqlx::query_as::<_, Recipe>(&sql)
             .bind(&pattern)
@@ -327,21 +323,7 @@ pub async fn list(
              {join}
              WHERE r.status = ANY($3)
              {order}
-             LIMIT $1 OFFSET $2",
-            join = if sort == "least_cooked" {
-                "LEFT JOIN (
-                    SELECT recipe_id, MAX(date) AS last_date
-                    FROM meal_plan_entries WHERE recipe_id IS NOT NULL
-                    GROUP BY recipe_id
-                 ) mp ON mp.recipe_id = r.id"
-            } else {
-                ""
-            },
-            order = match sort {
-                "least_cooked" => "ORDER BY mp.last_date ASC NULLS FIRST, r.title ASC",
-                "prep_time" => &format!("ORDER BY {prep_time_order}, r.title ASC"),
-                _ => "ORDER BY r.updated_at DESC",
-            },
+             LIMIT $1 OFFSET $2"
         );
         let items = sqlx::query_as::<_, Recipe>(&sql)
             .bind(per_page)
@@ -369,6 +351,8 @@ pub async fn update(
 ) -> Result<Option<RecipeDetail>, AppError> {
     use std::collections::HashSet;
 
+    let source_url = crate::validation::normalize_source_url(req.source_url.as_deref())?;
+
     let mut tx = pool.begin().await?;
 
     // B2: existence check inside transaction with FOR UPDATE to close TOCTOU window
@@ -380,22 +364,33 @@ pub async fn update(
         return Ok(None);
     }
 
-    // B2: always bump updated_at, even for section-only edits
+    // B2: always bump updated_at, even for section-only edits.
+    // COALESCE cannot express "clear this field" — it treats NULL as "keep" — so
+    // every user-clearable text column uses an explicit three-way CASE instead:
+    // NULL keeps, '' clears, anything else sets.
     sqlx::query(
         r#"
         UPDATE recipes SET
           title       = COALESCE($1, title),
-          description = COALESCE($2, description),
+          description = CASE WHEN $2::text IS NULL THEN description
+                             WHEN $2::text = ''    THEN NULL
+                             ELSE $2::text END,
           servings    = COALESCE($3, servings),
-          emoji       = COALESCE($4, emoji),
+          emoji       = CASE WHEN $4::text IS NULL THEN emoji
+                             WHEN $4::text = ''    THEN NULL
+                             ELSE $4::text END,
+          source_url  = CASE WHEN $5::text IS NULL THEN source_url
+                             WHEN $5::text = ''    THEN NULL
+                             ELSE $5::text END,
           updated_at  = now()
-        WHERE id = $5
+        WHERE id = $6
         "#,
     )
     .bind(&req.title)
     .bind(&req.description)
     .bind(req.servings)
     .bind(&req.emoji)
+    .bind(source_url)
     .bind(id)
     .execute(&mut *tx)
     .await?;
@@ -709,7 +704,9 @@ pub async fn create_discovered(
     servings: Option<i32>,
     tags: &[String],
     sections: &[crate::models::SectionInput],
-) -> Result<Recipe, sqlx::Error> {
+) -> Result<Recipe, AppError> {
+    crate::validation::check_source_url(source_url)?;
+
     let vec = Vector::from(embedding.to_vec());
     let mut tx = pool.begin().await?;
 

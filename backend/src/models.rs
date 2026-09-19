@@ -198,9 +198,13 @@ pub struct CreateRecipeRequest {
 #[derive(Debug, Deserialize)]
 pub struct UpdateRecipeRequest {
     pub title: Option<String>,
+    /// Absent/null keeps the stored value, `""` clears it. See `db::recipes::update`.
     pub description: Option<String>,
     pub servings: Option<i32>,
+    /// Absent/null keeps the stored value, `""` clears it.
     pub emoji: Option<String>,
+    /// Absent/null keeps the stored value, `""` clears it.
+    pub source_url: Option<String>,
     pub tags: Option<Vec<String>>,
     /// Full section set after edit. Sections without an `id` are inserts;
     /// sections present in DB but missing from this list are deletes.

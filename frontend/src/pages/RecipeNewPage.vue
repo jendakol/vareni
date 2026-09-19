@@ -61,9 +61,11 @@ import { useRouter } from 'vue-router'
 import { useToast } from 'vue-toastification'
 import { ingest, createRecipe } from '../api/recipes'
 import RecipeForm from '../components/RecipeForm.vue'
+import { useRecipeStore } from '../stores/recipes'
 
 const router = useRouter()
 const toast = useToast()
+const store = useRecipeStore()
 const activeTab = ref('manual')
 const tabs = [
   { key: 'manual', label: 'Napsat' },
@@ -125,6 +127,9 @@ async function handleIngest() {
 async function handleSave(data: any) {
   try {
     const recipe = await createRecipe(data)
+    // The cached list cannot patch this in — where the new recipe belongs under
+    // the current sort is unknown — so it reloads on its next activation.
+    store.markStale()
     toast.success('Recept uložen')
     router.push(`/recipes/${recipe.id}`)
   } catch (e: any) {

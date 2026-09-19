@@ -51,6 +51,157 @@ async fn create_recipe(ctx: &common::TestContext) -> serde_json::Value {
     serde_json::from_slice(&body).unwrap()
 }
 
+/// Create a recipe with a given title and prep time. Returns its id.
+async fn create_named(ctx: &common::TestContext, title: &str, prep_time_min: i64) -> String {
+    let (key, value) = ctx.auth_header_1();
+    let mut body = recipe_json();
+    body["title"] = json!(title);
+    body["sections"][0]["prep_time_min"] = json!(prep_time_min);
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/recipes")
+        .header("Content-Type", "application/json")
+        .header(key, value)
+        .body(Body::from(serde_json::to_string(&body).unwrap()))
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json["id"].as_str().unwrap().to_string()
+}
+
+/// PATCH a recipe's status. Only transitions allowed by `is_valid_transition` succeed.
+async fn set_status(ctx: &common::TestContext, id: &str, status: &str) {
+    let (key, value) = ctx.auth_header_1();
+    let req = Request::builder()
+        .method("PATCH")
+        .uri(format!("/api/recipes/{id}/status"))
+        .header("Content-Type", "application/json")
+        .header(key, value)
+        .body(Body::from(json!({ "status": status }).to_string()))
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+}
+
+/// GET /api/recipes with a raw query string; returns the titles in response order.
+async fn list_titles(ctx: &common::TestContext, query: &str) -> Vec<String> {
+    let (key, value) = ctx.auth_header_1();
+    let req = Request::builder()
+        .method("GET")
+        .uri(format!("/api/recipes?{query}"))
+        .header(key, value)
+        .body(Body::empty())
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK, "query: {query}");
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+    json["items"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|r| r["title"].as_str().unwrap().to_string())
+        .collect()
+}
+
+#[tokio::test]
+async fn search_combined_with_each_sort_returns_ok() {
+    let ctx = common::TestContext::new().await;
+    create_named(&ctx, "Pasta Verde", 10).await;
+
+    // Before the fix, SELECT DISTINCT + an ORDER BY expression outside the select
+    // list makes Postgres reject these two outright.
+    for sort in ["recent", "least_cooked", "prep_time"] {
+        let titles = list_titles(&ctx, &format!("q=pasta&sort={sort}")).await;
+        assert!(
+            titles.iter().any(|t| t == "Pasta Verde"),
+            "sort={sort} returned {titles:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tested_recipes_sort_before_saved_in_every_sort_mode() {
+    let ctx = common::TestContext::new().await;
+    let slow = create_named(&ctx, "Slow Tested", 90).await;
+    create_named(&ctx, "Fast Saved", 1).await;
+    set_status(&ctx, &slow, "tested").await;
+
+    for sort in ["recent", "least_cooked", "prep_time"] {
+        let titles = list_titles(&ctx, &format!("sort={sort}")).await;
+        assert_eq!(
+            titles.first().map(String::as_str),
+            Some("Slow Tested"),
+            "sort={sort} returned {titles:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn tag_filter_combined_with_each_sort_returns_ok() {
+    let ctx = common::TestContext::new().await;
+    // create_named keeps recipe_json()'s default tags: pasta, quick, Italian.
+    create_named(&ctx, "Tagged Pasta", 10).await;
+
+    // Before the fix, the tag branch shared the same join/order interpolation as
+    // the q branch, so a malformed hoist here would produce invalid SQL.
+    for sort in ["recent", "least_cooked", "prep_time"] {
+        let titles = list_titles(&ctx, &format!("tag=pasta&sort={sort}")).await;
+        assert!(
+            titles.iter().any(|t| t == "Tagged Pasta"),
+            "sort={sort} returned {titles:?}"
+        );
+    }
+}
+
+#[tokio::test]
+async fn paging_with_identical_timestamps_yields_each_recipe_once() {
+    let ctx = common::TestContext::new().await;
+    let mut created: Vec<(String, String)> = Vec::new();
+    for i in 0..5 {
+        let title = format!("Recipe {i}");
+        let id = create_named(&ctx, &title, 10).await;
+        created.push((id, title));
+    }
+    // Force a full tie on the primary sort key.
+    sqlx::query("UPDATE recipes SET created_at = now()")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    let mut seen = Vec::new();
+    for page in 1..=3 {
+        seen.extend(list_titles(&ctx, &format!("page={page}&per_page=2")).await);
+    }
+
+    // Do NOT sort `seen` — with status and created_at tied, the post-fix order is
+    // pure r.id DESC; pre-fix it is whatever the scan happens to return, which a
+    // set comparison can't tell apart from the correct order.
+    let mut expected = created;
+    expected.sort_by(|a, b| b.0.cmp(&a.0)); // id DESC
+    let expected_titles: Vec<String> = expected.into_iter().map(|(_, t)| t).collect();
+    assert_eq!(
+        seen, expected_titles,
+        "page order did not follow the r.id DESC tiebreaker"
+    );
+}
+
+#[tokio::test]
+async fn recent_sort_follows_creation_not_last_edit() {
+    let ctx = common::TestContext::new().await;
+    create_named(&ctx, "Older", 10).await;
+    create_named(&ctx, "Newer", 10).await;
+    // Editing the older recipe must not lift it above the newer one.
+    sqlx::query("UPDATE recipes SET updated_at = now() + interval '1 hour' WHERE title = 'Older'")
+        .execute(&ctx.pool)
+        .await
+        .unwrap();
+
+    assert_eq!(list_titles(&ctx, "sort=recent").await, ["Newer", "Older"]);
+}
+
 #[tokio::test]
 async fn create_recipe_returns_full_detail() {
     let ctx = common::TestContext::new().await;
@@ -679,4 +830,197 @@ async fn create_recipe_renumbers_step_order() {
         .map(|s| s["step_order"].as_i64().unwrap())
         .collect();
     assert_eq!(orders, vec![1, 2, 3]);
+}
+
+/// PUT a partial update and return the resulting recipe detail.
+async fn put_recipe(
+    ctx: &common::TestContext,
+    id: &str,
+    body: serde_json::Value,
+) -> serde_json::Value {
+    let (key, value) = ctx.auth_header_1();
+    let req = Request::builder()
+        .method("PUT")
+        .uri(format!("/api/recipes/{id}"))
+        .header("Content-Type", "application/json")
+        .header(key, value)
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::OK);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    serde_json::from_slice(&bytes).unwrap()
+}
+
+#[tokio::test]
+async fn text_fields_keep_on_absent_set_on_value_clear_on_empty_string() {
+    let ctx = common::TestContext::new().await;
+    let id = create_named(&ctx, "Linky", 10).await;
+
+    // Set all three.
+    let r = put_recipe(
+        &ctx,
+        &id,
+        json!({
+            "description": "Popis receptu",
+            "emoji": "🍝",
+            "source_url": "https://apetitonline.cz/recept",
+        }),
+    )
+    .await;
+    assert_eq!(r["description"], "Popis receptu");
+    assert_eq!(r["emoji"], "🍝");
+    assert_eq!(r["source_url"], "https://apetitonline.cz/recept");
+
+    // Absent -> keep. This is the case that protects a discovered recipe's URL
+    // during a section-only edit.
+    let r = put_recipe(&ctx, &id, json!({ "title": "Linky 2" })).await;
+    assert_eq!(r["title"], "Linky 2");
+    assert_eq!(r["description"], "Popis receptu");
+    assert_eq!(r["emoji"], "🍝");
+    assert_eq!(r["source_url"], "https://apetitonline.cz/recept");
+
+    // Empty string -> clear.
+    let r = put_recipe(
+        &ctx,
+        &id,
+        json!({ "description": "", "emoji": "", "source_url": "" }),
+    )
+    .await;
+    assert_eq!(r["description"], serde_json::Value::Null);
+    assert_eq!(r["emoji"], serde_json::Value::Null);
+    assert_eq!(r["source_url"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn mixed_keep_clear_set_in_one_request_does_not_cross_fields() {
+    let ctx = common::TestContext::new().await;
+    let id = create_named(&ctx, "Fusilli", 10).await;
+
+    // Seed all three with distinct, recognisable values.
+    let r = put_recipe(
+        &ctx,
+        &id,
+        json!({
+            "description": "Desc-Alpha",
+            "emoji": "🥐",
+            "source_url": "https://one.example/alpha",
+        }),
+    )
+    .await;
+    assert_eq!(r["description"], "Desc-Alpha");
+    assert_eq!(r["emoji"], "🥐");
+    assert_eq!(r["source_url"], "https://one.example/alpha");
+
+    // Round 1: clear description, keep emoji (omitted), set source_url to a new value.
+    let r = put_recipe(
+        &ctx,
+        &id,
+        json!({ "description": "", "source_url": "https://two.example/beta" }),
+    )
+    .await;
+    assert_eq!(r["description"], serde_json::Value::Null);
+    assert_eq!(r["emoji"], "🥐");
+    assert_eq!(r["source_url"], "https://two.example/beta");
+
+    // Round 2: rotate roles -- set description (previously cleared), clear emoji
+    // (previously kept), keep source_url (omitted, previously set). This puts
+    // every field through a different role than round 1, so a bind shift among
+    // $2 (description), $4 (emoji), $5 (source_url) can't hide behind a field
+    // that only ever played one role.
+    let r = put_recipe(
+        &ctx,
+        &id,
+        json!({ "description": "Desc-Gamma", "emoji": "" }),
+    )
+    .await;
+    assert_eq!(r["description"], "Desc-Gamma");
+    assert_eq!(r["emoji"], serde_json::Value::Null);
+    assert_eq!(r["source_url"], "https://two.example/beta");
+}
+
+#[tokio::test]
+async fn create_normalises_empty_strings_to_null() {
+    let ctx = common::TestContext::new().await;
+    let (key, value) = ctx.auth_header_1();
+    let mut body = recipe_json();
+    body["description"] = json!("");
+    body["emoji"] = json!("");
+    body["source_url"] = json!("");
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/recipes")
+        .header("Content-Type", "application/json")
+        .header(key, value)
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::CREATED);
+    let bytes = resp.into_body().collect().await.unwrap().to_bytes();
+    let json: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+
+    assert_eq!(json["description"], serde_json::Value::Null);
+    assert_eq!(json["emoji"], serde_json::Value::Null);
+    assert_eq!(json["source_url"], serde_json::Value::Null);
+}
+
+#[tokio::test]
+async fn rejects_non_http_source_url_on_create() {
+    let ctx = common::TestContext::new().await;
+    let (key, value) = ctx.auth_header_1();
+    let mut body = recipe_json();
+    body["title"] = json!("Hostile");
+    body["source_url"] = json!("javascript:alert(1)");
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/recipes")
+        .header("Content-Type", "application/json")
+        .header(key, value)
+        .body(Body::from(body.to_string()))
+        .unwrap();
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::BAD_REQUEST);
+
+    // Nothing was persisted.
+    let titles = list_titles(&ctx, "").await;
+    assert!(!titles.iter().any(|t| t == "Hostile"), "got {titles:?}");
+}
+
+#[tokio::test]
+async fn rejects_non_http_source_url_on_update() {
+    let ctx = common::TestContext::new().await;
+    let id = create_named(&ctx, "Safe", 10).await;
+    put_recipe(&ctx, &id, json!({ "source_url": "https://vareni.cz/x" })).await;
+
+    for hostile in [
+        "javascript:alert(1)",
+        "data:text/html,<script>",
+        "not-a-url",
+    ] {
+        let (key, value) = ctx.auth_header_1();
+        let req = Request::builder()
+            .method("PUT")
+            .uri(format!("/api/recipes/{id}"))
+            .header("Content-Type", "application/json")
+            .header(key, value)
+            .body(Body::from(json!({ "source_url": hostile }).to_string()))
+            .unwrap();
+        let resp = ctx.router.clone().oneshot(req).await.unwrap();
+        assert_eq!(resp.status(), StatusCode::BAD_REQUEST, "input: {hostile}");
+    }
+
+    // The good URL survived every rejected attempt.
+    let r = put_recipe(&ctx, &id, json!({})).await;
+    assert_eq!(r["source_url"], "https://vareni.cz/x");
+}
+
+#[tokio::test]
+async fn empty_source_url_is_still_accepted_as_clear() {
+    let ctx = common::TestContext::new().await;
+    let id = create_named(&ctx, "Clearable", 10).await;
+    put_recipe(&ctx, &id, json!({ "source_url": "https://vareni.cz/x" })).await;
+    let r = put_recipe(&ctx, &id, json!({ "source_url": "" })).await;
+    assert_eq!(r["source_url"], serde_json::Value::Null);
 }
