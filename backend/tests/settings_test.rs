@@ -1,5 +1,7 @@
 mod common;
 
+use common::WithAuth;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -9,14 +11,14 @@ use tower::ServiceExt;
 #[tokio::test]
 async fn add_and_remove_dietary_restriction() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Add restriction
     let req = Request::builder()
         .method("POST")
         .uri("/api/settings/restrictions")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "restriction": "vegetarian" })).unwrap(),
         ))
@@ -29,7 +31,7 @@ async fn add_and_remove_dietary_restriction() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/auth/me")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -48,7 +50,7 @@ async fn add_and_remove_dietary_restriction() {
         .method("DELETE")
         .uri("/api/settings/restrictions")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "restriction": "vegetarian" })).unwrap(),
         ))
@@ -61,7 +63,7 @@ async fn add_and_remove_dietary_restriction() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/auth/me")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -74,14 +76,14 @@ async fn add_and_remove_dietary_restriction() {
 #[tokio::test]
 async fn add_and_remove_food_preference() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Add preference
     let req = Request::builder()
         .method("POST")
         .uri("/api/settings/preferences")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "preference": "ryby" })).unwrap(),
         ))
@@ -94,7 +96,7 @@ async fn add_and_remove_food_preference() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/auth/me")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -113,7 +115,7 @@ async fn add_and_remove_food_preference() {
         .method("DELETE")
         .uri("/api/settings/preferences")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "preference": "ryby" })).unwrap(),
         ))
@@ -126,7 +128,7 @@ async fn add_and_remove_food_preference() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/auth/me")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 

@@ -11,6 +11,9 @@ pub enum AppError {
     #[error("Unauthorized")]
     Unauthorized,
 
+    #[error("Forbidden: {0}")]
+    Forbidden(String),
+
     #[error("Bad request: {0}")]
     BadRequest(String),
 
@@ -37,6 +40,10 @@ impl IntoResponse for AppError {
             AppError::Unauthorized => {
                 tracing::warn!("Unauthorized request");
                 (StatusCode::UNAUTHORIZED, self.to_string())
+            }
+            AppError::Forbidden(msg) => {
+                tracing::warn!("Forbidden: {msg}");
+                (StatusCode::FORBIDDEN, msg.clone())
             }
             AppError::BadRequest(msg) => {
                 tracing::warn!("Bad request: {msg}");

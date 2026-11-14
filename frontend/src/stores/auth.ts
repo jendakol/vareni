@@ -1,27 +1,19 @@
 import { defineStore } from 'pinia'
 import { ref } from 'vue'
 import * as authApi from '../api/auth'
+import { csrfToken } from '../api/client'
+
+// Legacy bearer token from the password login
+try { localStorage.removeItem('token') } catch { /* storage unavailable */ }
 
 export const useAuthStore = defineStore('auth', () => {
-  const token = ref(localStorage.getItem('token') || '')
   const user = ref<authApi.User | null>(null)
 
-  async function login(name: string, password: string) {
-    const resp = await authApi.login(name, password)
-    token.value = resp.token
-    user.value = resp.user
-    localStorage.setItem('token', resp.token)
-  }
-
   async function fetchMe() {
-    user.value = await authApi.me()
+    const u = await authApi.me()
+    csrfToken.value = u.csrf_token || ''
+    user.value = u
   }
 
-  function logout() {
-    token.value = ''
-    user.value = null
-    localStorage.removeItem('token')
-  }
-
-  return { token, user, login, fetchMe, logout }
+  return { user, csrf: csrfToken, fetchMe }
 })

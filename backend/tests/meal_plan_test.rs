@@ -1,5 +1,7 @@
 mod common;
 
+use common::WithAuth;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -7,12 +9,12 @@ use serde_json::json;
 use tower::ServiceExt;
 
 async fn create_recipe_for_plan(ctx: &common::TestContext) -> String {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "title": "Plan Recipe",
@@ -47,12 +49,12 @@ async fn create_meal_plan_with_recipe() {
     let ctx = common::TestContext::new().await;
     let recipe_id = create_recipe_for_plan(&ctx).await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/plan")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "date": "2026-04-15",
@@ -72,12 +74,12 @@ async fn create_meal_plan_with_recipe() {
 async fn create_meal_plan_with_free_text() {
     let ctx = common::TestContext::new().await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/plan")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "date": "2026-04-15",
@@ -96,12 +98,12 @@ async fn create_meal_plan_with_free_text() {
 async fn create_meal_plan_without_recipe_or_text_fails() {
     let ctx = common::TestContext::new().await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/plan")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "date": "2026-04-15",
@@ -120,14 +122,14 @@ async fn create_meal_plan_without_recipe_or_text_fails() {
 async fn list_by_date_range() {
     let ctx = common::TestContext::new().await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     // Create two entries on different dates
     for date in ["2026-04-15", "2026-04-20"] {
         let req = Request::builder()
             .method("POST")
             .uri("/api/plan")
             .header("Content-Type", "application/json")
-            .header(&key, &value)
+            .with_auth(&auth)
             .body(Body::from(
                 serde_json::to_string(&json!({
                     "date": date,
@@ -144,7 +146,7 @@ async fn list_by_date_range() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/plan?from=2026-04-14&to=2026-04-16")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -158,12 +160,12 @@ async fn list_by_date_range() {
 async fn update_meal_plan_status() {
     let ctx = common::TestContext::new().await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/plan")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "date": "2026-04-15",
@@ -184,7 +186,7 @@ async fn update_meal_plan_status() {
         .method("PUT")
         .uri(format!("/api/plan/{id}"))
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "status": "cooked" })).unwrap(),
         ))
@@ -201,12 +203,12 @@ async fn update_meal_plan_status() {
 async fn delete_meal_plan_entry() {
     let ctx = common::TestContext::new().await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/plan")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "date": "2026-04-15",
@@ -225,7 +227,7 @@ async fn delete_meal_plan_entry() {
     let req = Request::builder()
         .method("DELETE")
         .uri(format!("/api/plan/{id}"))
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -236,7 +238,7 @@ async fn delete_meal_plan_entry() {
 #[tokio::test]
 async fn suggest_free_text_returns_distinct_matches_ignoring_diacritics() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Seed three free-text entries: two duplicates and one different
     for (date, text) in [
@@ -248,7 +250,7 @@ async fn suggest_free_text_returns_distinct_matches_ignoring_diacritics() {
             .method("POST")
             .uri("/api/plan")
             .header("Content-Type", "application/json")
-            .header(&key, &value)
+            .with_auth(&auth)
             .body(Body::from(
                 serde_json::to_string(&json!({
                     "date": date,
@@ -266,7 +268,7 @@ async fn suggest_free_text_returns_distinct_matches_ignoring_diacritics() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/plan/suggest_free_text?q=lucinou")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -281,7 +283,7 @@ async fn suggest_free_text_returns_distinct_matches_ignoring_diacritics() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/plan/suggest_free_text?q=o")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();

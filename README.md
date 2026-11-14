@@ -27,7 +27,7 @@ cp .env.example .env
 
 V `.env` nastavte:
 - `ANTHROPIC_API_KEY` — API klíč z Anthropic Console
-- `JWT_SECRET` — náhodný řetězec, min 32 znaků (např. `openssl rand -hex 32`)
+- `OIDC_ISSUER_URL`, `OIDC_CLIENT_ID`, `OIDC_CLIENT_SECRET`, `OIDC_REDIRECT_URI` — přihlášení přes Keycloak, viz [Přihlášení (OIDC)](#přihlášení-oidc)
 
 Ostatní hodnoty mají rozumné defaulty. Kompletní přehled viz [Konfigurace](#konfigurace).
 
@@ -88,6 +88,40 @@ docker run -d \
   vareni
 ```
 
+## Přihlášení (OIDC)
+
+Přihlášení řeší Keycloak (authorization code + PKCE, server drží session v HttpOnly cookie `__Host-vareni_session`). Přihlásí se jen uživatel, jehož Keycloak `sub` je uložen v `users.external_id` **a** který má v ID tokenu roli `OIDC_REQUIRED_ROLE`. Jinak 403.
+
+### Nastavení Keycloaku
+1. Zálohujte realm (export).
+2. Client `vareni`: confidential, standard flow, PKCE S256. Valid redirect URI `https://<host>/api/auth/callback`, valid post logout redirect URI `https://<host>/`.
+3. Mapper typu *User Realm Role*: claim `roles` (bez teček), multivalued, *Add to ID token* zapnuto.
+4. Roli `vareni` přiřaďte jen uživatelům, kteří mají mít přístup. V realmu nesmí být povolená self-registrace.
+5. ID token musí být podepsaný RS256 (výchozí v Keycloaku); jiný algoritmus realmu = `invalid_token`.
+6. `OIDC_ISSUER_URL` musí přesně odpovídat `iss` v tokenu (veřejné URL, ne interní hostname).
+
+### Pořadí nasazení
+1. `pg_dump` a ověření obnovy.
+2. Nastavit Keycloak a `.env`.
+3. Nasadit nový image (aplikuje migraci 009; do nasazení seedu každý dostane 403).
+4. Propojit uživatele: `UPDATE users SET external_id = '<sub>' WHERE name = '<jméno>';`
+5. Vyzkoušet přihlášení. Sloupec `password_hash` zůstává (nullable) a smaže se až pozdější migrací.
+
+Po nasazení jsou všichni odhlášeni. Rollback: obnovit dump, nebo `DELETE FROM _sqlx_migrations WHERE version = 9` a ruční revert (staré verze po 009 nenastartují). Stará verze navíc vyžaduje `JWT_SECRET` (min. 32 znaků) a uživatele s `password_hash`; bez něj rollback nejde.
+
+### Nouzový přístup a správa session
+```bash
+docker compose exec app ./cooking-app create-session <jméno>   # vypíše hodnotu cookie
+docker compose exec app ./cooking-app revoke-sessions <jméno>  # zneplatní všechny session uživatele
+```
+Příkazy vyžadují `DATABASE_URL`. Odebrání role v Keycloaku existující session neukončí — použijte `revoke-sessions`.
+
+### Poznámky
+- Odhlášení volá Keycloak end_session, takže ukončí SSO pro celý realm.
+- `OIDC_ROLE_CLAIM` nesmí ukazovat na claim, který si uživatel může sám upravit (např. atribut profilu).
+- `/uploads` a `/metrics` jsou bez autentizace.
+- `POST /api/log` (Home Assistant) dál používá statický Bearer `LOG_API_TOKEN`.
+
 ## Konfigurace
 
 Nastavení přes proměnné prostředí (soubor `.env`). Docker Compose nastaví `DATABASE_URL` automaticky.
@@ -96,8 +130,16 @@ Nastavení přes proměnné prostředí (soubor `.env`). Docker Compose nastaví
 |-----------------------|------------------------------------------|---------------------|
 | `DATABASE_URL`        | PostgreSQL connection string             | povinné*            |
 | `ANTHROPIC_API_KEY`   | API klíč pro Claude                      | povinné             |
-| `JWT_SECRET`          | Tajný klíč pro JWT tokeny (min 32 znaků) | povinné             |
-| `JWT_EXPIRY_HOURS`    | Platnost tokenu v hodinách               | `720` (30 dní)      |
+| `OIDC_ISSUER_URL`     | Issuer Keycloaku (musí přesně odpovídat `iss`) | nutné pro login       |
+| `OIDC_CLIENT_ID`      | Client ID v Keycloaku                    | nutné pro login             |
+| `OIDC_CLIENT_SECRET`  | Secret confidential klienta              | nutné pro login             |
+| `OIDC_REDIRECT_URI`   | `https://<host>/api/auth/callback`       | nutné pro login             |
+| `OIDC_POST_LOGOUT_REDIRECT_URI` | Návrat po odhlášení            | `{BASE_URL}/`       |
+| `OIDC_REQUIRED_ROLE`  | Role vyžadovaná v ID tokenu              | `vareni`            |
+| `OIDC_ROLE_CLAIM`     | Claim s rolemi (tečková cesta povolena)  | `roles`             |
+| `SESSION_TTL_HOURS`   | Platnost session                         | `720` (30 dní)      |
+| `COOKIE_SECURE`       | Secure cookie (v produkci nelze vypnout) | `true`              |
+| `ENVIRONMENT`         | `local` povolí HTTP vývoj a `debug-auth` | `production`        |
 | `BASE_URL`            | Veřejná URL aplikace                     | `http://localhost:8080` |
 | `EMBEDDING_MODEL_DIR` | Cesta k ONNX embedding modelu            | volitelné           |
 | `DISCOVERY_ENABLED`   | Povolení discovery                       | `true`              |

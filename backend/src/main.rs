@@ -3,7 +3,7 @@ use std::sync::Arc;
 use sqlx::PgPool;
 use tracing_subscriber::EnvFilter;
 
-use cooking_app::{AppState, config, create_router, metrics};
+use cooking_app::{AppState, auth_oidc, cli, config, create_router, db, metrics};
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -18,12 +18,22 @@ async fn main() -> anyhow::Result<()> {
         }))
         .init();
 
+    let args: Vec<String> = std::env::args().skip(1).collect();
+    if !args.is_empty() {
+        return cli::run(&args).await;
+    }
+
     let config = config::Config::from_env()?;
+    match &config.oidc {
+        Some(oidc) => tracing::info!(issuer = %oidc.issuer_url, "OIDC login enabled"),
+        None => tracing::warn!("OIDC not configured — web login disabled, all sessions rejected"),
+    }
     let pool = PgPool::connect(&config.database_url).await?;
 
     sqlx::migrate!("./migrations").run(&pool).await?;
 
     metrics::spawn_gauge_refresh(pool.clone(), config.metrics_gauge_refresh_secs);
+    db::sessions::spawn_cleanup(pool.clone());
 
     let mut default_headers = reqwest::header::HeaderMap::new();
     default_headers.insert(
@@ -95,6 +105,7 @@ async fn main() -> anyhow::Result<()> {
         http_client,
         embedding,
         browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        oidc: Arc::new(auth_oidc::Oidc::new()?),
     };
 
     let app = create_router(state);

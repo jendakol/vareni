@@ -1,5 +1,7 @@
 mod common;
 
+use common::WithAuth;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -36,12 +38,12 @@ fn recipe_json() -> serde_json::Value {
 }
 
 async fn create_recipe(ctx: &common::TestContext) -> serde_json::Value {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&recipe_json()).unwrap()))
         .unwrap();
 
@@ -53,7 +55,7 @@ async fn create_recipe(ctx: &common::TestContext) -> serde_json::Value {
 
 /// Create a recipe with a given title and prep time. Returns its id.
 async fn create_named(ctx: &common::TestContext, title: &str, prep_time_min: i64) -> String {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let mut body = recipe_json();
     body["title"] = json!(title);
     body["sections"][0]["prep_time_min"] = json!(prep_time_min);
@@ -61,7 +63,7 @@ async fn create_named(ctx: &common::TestContext, title: &str, prep_time_min: i64
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&body).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -73,12 +75,12 @@ async fn create_named(ctx: &common::TestContext, title: &str, prep_time_min: i64
 
 /// PATCH a recipe's status. Only transitions allowed by `is_valid_transition` succeed.
 async fn set_status(ctx: &common::TestContext, id: &str, status: &str) {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("PATCH")
         .uri(format!("/api/recipes/{id}/status"))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(json!({ "status": status }).to_string()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -87,11 +89,11 @@ async fn set_status(ctx: &common::TestContext, id: &str, status: &str) {
 
 /// GET /api/recipes with a raw query string; returns the titles in response order.
 async fn list_titles(ctx: &common::TestContext, query: &str) -> Vec<String> {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("GET")
         .uri(format!("/api/recipes?{query}"))
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -227,11 +229,11 @@ async fn list_recipes_paginated() {
     create_recipe(&ctx).await;
     create_recipe(&ctx).await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?page=1&per_page=10")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -248,11 +250,11 @@ async fn list_recipes_search() {
     let ctx = common::TestContext::new().await;
     create_recipe(&ctx).await; // "Test Pasta"
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?q=Pasta")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -265,7 +267,7 @@ async fn list_recipes_search() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?q=sushi")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -278,7 +280,7 @@ async fn list_recipes_search() {
 #[tokio::test]
 async fn search_ignores_diacritics_and_case() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Create a recipe with Czech diacritics in the title
     let payload = json!({
@@ -294,7 +296,7 @@ async fn search_ignores_diacritics_and_case() {
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -304,7 +306,7 @@ async fn search_ignores_diacritics_and_case() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?q=palacinky")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -319,7 +321,7 @@ async fn search_ignores_diacritics_and_case() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?q=SLEHACKOU")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -336,11 +338,11 @@ async fn list_recipes_tag_filter() {
     let ctx = common::TestContext::new().await;
     create_recipe(&ctx).await; // tags: pasta, quick, Italian
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?tag=pasta")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -353,7 +355,7 @@ async fn list_recipes_tag_filter() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?tag=dessert")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -369,11 +371,11 @@ async fn get_recipe_detail() {
     let created = create_recipe(&ctx).await;
     let id = created["id"].as_str().unwrap();
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("GET")
         .uri(format!("/api/recipes/{id}"))
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -396,12 +398,12 @@ async fn update_recipe() {
     let created = create_recipe(&ctx).await;
     let id = created["id"].as_str().unwrap();
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("PUT")
         .uri(format!("/api/recipes/{id}"))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "title": "Updated Pasta",
@@ -425,11 +427,11 @@ async fn delete_recipe() {
     let created = create_recipe(&ctx).await;
     let id = created["id"].as_str().unwrap();
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("DELETE")
         .uri(format!("/api/recipes/{id}"))
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -440,7 +442,7 @@ async fn delete_recipe() {
     let req = Request::builder()
         .method("GET")
         .uri(format!("/api/recipes/{id}"))
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -454,11 +456,11 @@ async fn both_users_see_all_recipes() {
     create_recipe(&ctx).await; // created by user1
 
     // user2 can see it
-    let (key, value) = ctx.auth_header_2();
+    let auth = ctx.auth_2();
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -471,13 +473,13 @@ async fn both_users_see_all_recipes() {
 #[tokio::test]
 async fn duplicate_ingredient_in_recipe() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "title": "Flour Test",
@@ -561,12 +563,12 @@ async fn create_recipe_with_multiple_sections() {
             }
         ]
     });
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -597,12 +599,12 @@ async fn create_recipe_rejects_empty_sections() {
         "source_type": "manual",
         "sections": []
     });
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -628,12 +630,12 @@ async fn update_recipe_rejects_foreign_section_id() {
             }
         ]
     });
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("PUT")
         .uri(format!("/api/recipes/{}", recipe_a_id))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -653,12 +655,12 @@ async fn update_recipe_deletes_removed_section() {
             { "label": "B", "sort_order": 1, "ingredients": [{ "name": "y", "amount": 1.0, "unit": "g", "note": null }], "steps": [] }
         ]
     });
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key.clone(), value.clone())
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -677,7 +679,7 @@ async fn update_recipe_deletes_removed_section() {
         .method("PUT")
         .uri(format!("/api/recipes/{}", recipe_id))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&update).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -701,12 +703,12 @@ async fn update_recipe_reorders_sections() {
             { "label": "Third",  "sort_order": 2, "ingredients": [], "steps": [] }
         ]
     });
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key.clone(), value.clone())
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -728,7 +730,7 @@ async fn update_recipe_reorders_sections() {
         .method("PUT")
         .uri(format!("/api/recipes/{}", recipe_id))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&update).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -749,13 +751,13 @@ async fn update_status_returns_derived_times() {
     let json_resp = create_recipe(&ctx).await;
     let recipe_id = json_resp["id"].as_str().unwrap();
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let body = json!({ "status": "tested" });
     let req = Request::builder()
         .method("PATCH")
         .uri(format!("/api/recipes/{}/status", recipe_id))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&body).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -774,7 +776,7 @@ async fn update_recipe_rejects_duplicate_section_id() {
     let recipe_id = json_resp["id"].as_str().unwrap();
     let section_id = json_resp["sections"][0]["id"].as_str().unwrap();
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let payload = json!({
         "sections": [
             { "id": section_id, "label": "A", "sort_order": 0, "ingredients": [], "steps": [] },
@@ -785,7 +787,7 @@ async fn update_recipe_rejects_duplicate_section_id() {
         .method("PUT")
         .uri(format!("/api/recipes/{}", recipe_id))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -811,12 +813,12 @@ async fn create_recipe_renumbers_step_order() {
             }
         ]
     });
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&payload).unwrap()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -838,12 +840,12 @@ async fn put_recipe(
     id: &str,
     body: serde_json::Value,
 ) -> serde_json::Value {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("PUT")
         .uri(format!("/api/recipes/{id}"))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(body.to_string()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -942,7 +944,7 @@ async fn mixed_keep_clear_set_in_one_request_does_not_cross_fields() {
 #[tokio::test]
 async fn create_normalises_empty_strings_to_null() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let mut body = recipe_json();
     body["description"] = json!("");
     body["emoji"] = json!("");
@@ -952,7 +954,7 @@ async fn create_normalises_empty_strings_to_null() {
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(body.to_string()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -968,7 +970,7 @@ async fn create_normalises_empty_strings_to_null() {
 #[tokio::test]
 async fn rejects_non_http_source_url_on_create() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let mut body = recipe_json();
     body["title"] = json!("Hostile");
     body["source_url"] = json!("javascript:alert(1)");
@@ -977,7 +979,7 @@ async fn rejects_non_http_source_url_on_create() {
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(body.to_string()))
         .unwrap();
     let resp = ctx.router.clone().oneshot(req).await.unwrap();
@@ -999,12 +1001,12 @@ async fn rejects_non_http_source_url_on_update() {
         "data:text/html,<script>",
         "not-a-url",
     ] {
-        let (key, value) = ctx.auth_header_1();
+        let auth = ctx.auth_1();
         let req = Request::builder()
             .method("PUT")
             .uri(format!("/api/recipes/{id}"))
             .header("Content-Type", "application/json")
-            .header(key, value)
+            .with_auth(&auth)
             .body(Body::from(json!({ "source_url": hostile }).to_string()))
             .unwrap();
         let resp = ctx.router.clone().oneshot(req).await.unwrap();

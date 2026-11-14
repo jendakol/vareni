@@ -7,6 +7,8 @@
 
 mod common;
 
+use common::WithAuth;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -21,13 +23,10 @@ async fn oneshot_json(
     ctx: &common::TestContext,
     method: &str,
     uri: &str,
-    auth: (&str, &str),
+    auth: &common::TestAuth,
     body: Option<serde_json::Value>,
 ) -> (StatusCode, serde_json::Value) {
-    let mut builder = Request::builder()
-        .method(method)
-        .uri(uri)
-        .header(auth.0, auth.1);
+    let mut builder = Request::builder().method(method).uri(uri).with_auth(auth);
 
     let req_body = if let Some(json) = body {
         builder = builder.header("Content-Type", "application/json");
@@ -83,13 +82,13 @@ fn single_section_payload() -> serde_json::Value {
 #[ignore = "smoke test: run with --ignored"]
 async fn test_01_create_single_section_recipe() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     let (status, body) = oneshot_json(
         &ctx,
         "POST",
         "/api/recipes",
-        (&key, &value),
+        &auth,
         Some(single_section_payload()),
     )
     .await;
@@ -138,14 +137,14 @@ async fn test_01_create_single_section_recipe() {
 #[ignore = "smoke test: run with --ignored"]
 async fn test_02_add_second_section() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Create
     let (_, created) = oneshot_json(
         &ctx,
         "POST",
         "/api/recipes",
-        (&key, &value),
+        &auth,
         Some(single_section_payload()),
     )
     .await;
@@ -191,7 +190,7 @@ async fn test_02_add_second_section() {
         &ctx,
         "PUT",
         &format!("/api/recipes/{recipe_id}"),
-        (&key, &value),
+        &auth,
         Some(update),
     )
     .await;
@@ -246,7 +245,7 @@ async fn test_02_add_second_section() {
 #[ignore = "smoke test: run with --ignored"]
 async fn test_03_merge_to_single_anonymous_section() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Create 2-section recipe
     let two_section = json!({
@@ -272,14 +271,7 @@ async fn test_03_merge_to_single_anonymous_section() {
         ]
     });
 
-    let (_, created) = oneshot_json(
-        &ctx,
-        "POST",
-        "/api/recipes",
-        (&key, &value),
-        Some(two_section),
-    )
-    .await;
+    let (_, created) = oneshot_json(&ctx, "POST", "/api/recipes", &auth, Some(two_section)).await;
     let recipe_id = created["id"].as_str().unwrap();
     eprintln!("[test_03] created recipe_id={recipe_id}");
     assert_eq!(
@@ -312,7 +304,7 @@ async fn test_03_merge_to_single_anonymous_section() {
         &ctx,
         "PUT",
         &format!("/api/recipes/{recipe_id}"),
-        (&key, &value),
+        &auth,
         Some(merged),
     )
     .await;
@@ -352,7 +344,7 @@ async fn test_03_merge_to_single_anonymous_section() {
 #[ignore = "smoke test: run with --ignored"]
 async fn test_04_delete_section_via_put() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Create 2-section recipe
     let two_section = json!({
@@ -378,14 +370,7 @@ async fn test_04_delete_section_via_put() {
         ]
     });
 
-    let (_, created) = oneshot_json(
-        &ctx,
-        "POST",
-        "/api/recipes",
-        (&key, &value),
-        Some(two_section),
-    )
-    .await;
+    let (_, created) = oneshot_json(&ctx, "POST", "/api/recipes", &auth, Some(two_section)).await;
     let recipe_id = created["id"].as_str().unwrap();
     let keep_section_id = created["sections"][0]["id"].as_str().unwrap();
     let drop_section_id = created["sections"][1]["id"].as_str().unwrap();
@@ -412,7 +397,7 @@ async fn test_04_delete_section_via_put() {
         &ctx,
         "PUT",
         &format!("/api/recipes/{recipe_id}"),
-        (&key, &value),
+        &auth,
         Some(update),
     )
     .await;
@@ -442,7 +427,7 @@ async fn test_04_delete_section_via_put() {
         &ctx,
         "GET",
         &format!("/api/recipes/{recipe_id}"),
-        (&key, &value),
+        &auth,
         None,
     )
     .await;
@@ -483,14 +468,14 @@ async fn test_04_delete_section_via_put() {
 #[ignore = "smoke test: run with --ignored"]
 async fn test_05_reject_cross_recipe_section_id_injection() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Create recipe A
     let (_, recipe_a) = oneshot_json(
         &ctx,
         "POST",
         "/api/recipes",
-        (&key, &value),
+        &auth,
         Some(single_section_payload()),
     )
     .await;
@@ -501,7 +486,7 @@ async fn test_05_reject_cross_recipe_section_id_injection() {
         &ctx,
         "POST",
         "/api/recipes",
-        (&key, &value),
+        &auth,
         Some(json!({
             "title": "Recipe B",
             "source_type": "manual",
@@ -538,7 +523,7 @@ async fn test_05_reject_cross_recipe_section_id_injection() {
         &ctx,
         "PUT",
         &format!("/api/recipes/{recipe_a_id}"),
-        (&key, &value),
+        &auth,
         Some(payload),
     )
     .await;
@@ -644,14 +629,14 @@ async fn test_06_ai_ingest_url_multi_section() {
 #[ignore = "smoke test: run with --ignored"]
 async fn test_07_delete_recipe_then_404() {
     let ctx = common::TestContext::new().await;
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Create
     let (create_status, created) = oneshot_json(
         &ctx,
         "POST",
         "/api/recipes",
-        (&key, &value),
+        &auth,
         Some(single_section_payload()),
     )
     .await;
@@ -665,7 +650,7 @@ async fn test_07_delete_recipe_then_404() {
         &ctx,
         "DELETE",
         &format!("/api/recipes/{recipe_id}"),
-        (&key, &value),
+        &auth,
         None,
     )
     .await;
@@ -687,7 +672,7 @@ async fn test_07_delete_recipe_then_404() {
         &ctx,
         "GET",
         &format!("/api/recipes/{recipe_id}"),
-        (&key, &value),
+        &auth,
         None,
     )
     .await;

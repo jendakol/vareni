@@ -1,5 +1,7 @@
 mod common;
 
+use common::WithAuth;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -8,12 +10,12 @@ use tower::ServiceExt;
 
 async fn create_and_share(ctx: &common::TestContext) -> (String, String) {
     // Create a recipe
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({
                 "title": "Shared Recipe",
@@ -40,7 +42,7 @@ async fn create_and_share(ctx: &common::TestContext) -> (String, String) {
     let req = Request::builder()
         .method("POST")
         .uri(format!("/api/recipes/{recipe_id}/share"))
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -92,11 +94,11 @@ async fn unshare_revokes_access() {
     let (recipe_id, slug) = create_and_share(&ctx).await;
 
     // Unshare
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("DELETE")
         .uri(format!("/api/recipes/{recipe_id}/share"))
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 

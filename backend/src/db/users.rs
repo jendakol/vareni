@@ -4,27 +4,33 @@ use uuid::Uuid;
 use crate::models::User;
 
 pub async fn list_all(pool: &PgPool) -> Result<Vec<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>(
-        "SELECT id, name, email, password_hash, created_at FROM users ORDER BY name",
-    )
-    .fetch_all(pool)
-    .await
+    sqlx::query_as::<_, User>("SELECT id, name, email, created_at FROM users ORDER BY name")
+        .fetch_all(pool)
+        .await
 }
 
 pub async fn find_by_name(pool: &PgPool, name: &str) -> Result<Option<User>, sqlx::Error> {
-    sqlx::query_as::<_, User>(
-        "SELECT id, name, email, password_hash, created_at FROM users WHERE name = $1",
-    )
-    .bind(name)
-    .fetch_optional(pool)
-    .await
+    sqlx::query_as::<_, User>("SELECT id, name, email, created_at FROM users WHERE name = $1")
+        .bind(name)
+        .fetch_optional(pool)
+        .await
 }
 
 pub async fn find_by_id(pool: &PgPool, id: Uuid) -> Result<Option<User>, sqlx::Error> {
+    sqlx::query_as::<_, User>("SELECT id, name, email, created_at FROM users WHERE id = $1")
+        .bind(id)
+        .fetch_optional(pool)
+        .await
+}
+
+pub async fn find_by_external_id(
+    pool: &PgPool,
+    external_id: &str,
+) -> Result<Option<User>, sqlx::Error> {
     sqlx::query_as::<_, User>(
-        "SELECT id, name, email, password_hash, created_at FROM users WHERE id = $1",
+        "SELECT id, name, email, created_at FROM users WHERE external_id = $1",
     )
-    .bind(id)
+    .bind(external_id)
     .fetch_optional(pool)
     .await
 }

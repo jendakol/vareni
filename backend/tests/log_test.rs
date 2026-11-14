@@ -116,3 +116,27 @@ async fn log_entry_defaults_date_to_today() {
         json["date"]
     );
 }
+
+#[tokio::test]
+async fn log_entry_rejects_session_cookie() {
+    let ctx = common::TestContext::new().await;
+
+    let req = Request::builder()
+        .method("POST")
+        .uri("/api/log")
+        .header("Content-Type", "application/json")
+        .header("Cookie", &ctx.user1_auth.cookie)
+        .header("X-CSRF-Token", &ctx.user1_auth.csrf)
+        .body(Body::from(
+            json!({
+                "meal_type": "lunch",
+                "free_text": "soup",
+                "user_name": "Test User 1"
+            })
+            .to_string(),
+        ))
+        .unwrap();
+
+    let resp = ctx.router.clone().oneshot(req).await.unwrap();
+    assert_eq!(resp.status(), StatusCode::UNAUTHORIZED);
+}

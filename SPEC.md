@@ -8,7 +8,7 @@ A self-hosted, two-user cooking assistant app for managing recipes, planning mea
 
 ## Users
 
-Two fixed users (Jenda + přítelkyně). No public registration. Auth via simple login (email + password, bcrypt, JWT). Both users share the same recipe database.
+Two fixed users (Jenda + přítelkyně). No public registration. Auth via OIDC/Keycloak (server-side session cookie, users linked by `users.external_id` = Keycloak `sub`, access gated by a role). Both users share the same recipe database.
 
 ---
 
@@ -152,8 +152,7 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 uuid = { version = "1", features = ["v4", "serde"] }
 time = { version = "0.3", features = ["serde"] }
-bcrypt = "0.17"
-jsonwebtoken = "9"
+openidconnect = "4"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 tower = "0.5"
 anyhow = "1"
@@ -182,7 +181,8 @@ CREATE TABLE users (
   id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
   name TEXT NOT NULL,
   email TEXT UNIQUE NOT NULL,
-  password_hash TEXT NOT NULL,
+  external_id TEXT UNIQUE,  -- Keycloak sub
+  password_hash TEXT,       -- legacy, unused
   created_at TIMESTAMPTZ DEFAULT now()
 );
 
@@ -429,9 +429,10 @@ Return ONLY a valid JSON array:
 
 ### Auth
 ```
-POST /api/auth/login     { email, password } → { token, user }
-POST /api/auth/logout
-GET  /api/auth/me        → user + dietary restrictions
+GET  /api/auth/login     → redirect to Keycloak
+GET  /api/auth/callback  → session cookie, redirect
+POST /api/auth/logout    (form, csrf_token)
+GET  /api/auth/me        → user + dietary restrictions + csrf_token
 ```
 
 ### Recipes
@@ -528,8 +529,11 @@ GET /r/:slug                    → returns index.html (Vue Router handles rende
 ```env
 DATABASE_URL=postgresql://user:pass@host:5432/cookingapp
 ANTHROPIC_API_KEY=sk-ant-...
-JWT_SECRET=...
-JWT_EXPIRY_HOURS=720
+OIDC_ISSUER_URL=...
+OIDC_CLIENT_ID=vareni
+OIDC_CLIENT_SECRET=...
+OIDC_REDIRECT_URI=https://your-domain.com/api/auth/callback
+SESSION_TTL_HOURS=720
 BASE_URL=https://your-domain.com
 STATIC_DIR=./static
 UPLOAD_DIR=./uploads

@@ -5,48 +5,33 @@ use uuid::Uuid;
 
 // -- Users --
 
-#[derive(Clone, FromRow, Serialize)]
+/// Public user record. `external_id` (IdP subject) is deliberately not part of it.
+#[derive(Debug, Clone, FromRow, Serialize)]
 pub struct User {
     pub id: Uuid,
     pub name: String,
     pub email: String,
-    #[serde(skip_serializing)]
-    pub password_hash: String,
     pub created_at: Option<OffsetDateTime>,
 }
 
-impl std::fmt::Debug for User {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("User")
-            .field("id", &self.id)
-            .field("name", &self.name)
-            .field("email", &self.email)
-            .field("password_hash", &"[REDACTED]")
-            .field("created_at", &self.created_at)
-            .finish()
-    }
-}
-
-#[derive(Debug, Serialize)]
+#[derive(Serialize)]
 pub struct UserProfile {
     #[serde(flatten)]
     pub user: User,
     pub dietary_restrictions: Vec<String>,
     pub food_preferences: Vec<String>,
+    pub csrf_token: String,
 }
 
-// -- Auth --
-
-#[derive(Debug, Deserialize)]
-pub struct LoginRequest {
-    pub name: String,
-    pub password: String,
-}
-
-#[derive(Debug, Serialize)]
-pub struct LoginResponse {
-    pub token: String,
-    pub user: User,
+impl std::fmt::Debug for UserProfile {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("UserProfile")
+            .field("user", &self.user)
+            .field("dietary_restrictions", &self.dietary_restrictions)
+            .field("food_preferences", &self.food_preferences)
+            .field("csrf_token", &"[REDACTED]")
+            .finish()
+    }
 }
 
 // -- Recipes --

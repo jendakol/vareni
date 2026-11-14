@@ -4,12 +4,14 @@ use axum::Router;
 use axum::routing::{get, patch, post, put};
 use tokio::sync::Semaphore;
 use tower_http::services::{ServeDir, ServeFile};
-use tower_http::trace::{DefaultMakeSpan, DefaultOnResponse, TraceLayer};
+use tower_http::trace::{DefaultOnResponse, TraceLayer};
 use tracing::Level;
 
 pub mod ai;
 pub mod auth;
+pub mod auth_oidc;
 pub mod browser;
+pub mod cli;
 pub mod config;
 pub mod db;
 pub mod embedding;
@@ -27,6 +29,17 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub embedding: Option<Arc<embedding::EmbeddingService>>,
     pub browser_semaphore: Arc<Semaphore>,
+    pub oidc: Arc<auth_oidc::Oidc>,
+}
+
+#[cfg(feature = "debug-auth")]
+fn dev_routes() -> Router<AppState> {
+    Router::new().route("/auth/dev-login", get(auth::dev_login))
+}
+
+#[cfg(not(feature = "debug-auth"))]
+fn dev_routes() -> Router<AppState> {
+    Router::new()
 }
 
 pub fn create_router(state: AppState) -> Router {
@@ -34,9 +47,12 @@ pub fn create_router(state: AppState) -> Router {
 
     let api = Router::new()
         // Auth
-        .route("/auth/login", post(routes::auth::login))
+        .route("/auth/login", get(auth_oidc::login))
+        .route("/auth/callback", get(auth_oidc::callback))
+        .route("/auth/logout", post(auth_oidc::logout))
         .route("/auth/me", get(routes::auth::me))
         .route("/auth/users", get(routes::auth::list_users))
+        .merge(dev_routes())
         // Recipes
         .route(
             "/recipes",
@@ -107,11 +123,10 @@ pub fn create_router(state: AppState) -> Router {
         .layer(prometheus_layer)
         .layer(
             TraceLayer::new_for_http()
-                .make_span_with(
-                    DefaultMakeSpan::new()
-                        .level(Level::INFO)
-                        .include_headers(false),
-                )
+                // Path only: query strings may carry OIDC code/state.
+                .make_span_with(|req: &axum::http::Request<axum::body::Body>| {
+                    tracing::info_span!("request", method = %req.method(), path = %req.uri().path())
+                })
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .with_state(state)

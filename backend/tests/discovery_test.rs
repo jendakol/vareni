@@ -1,5 +1,7 @@
 mod common;
 
+use common::WithAuth;
+
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
 use http_body_util::BodyExt;
@@ -31,12 +33,12 @@ fn recipe_json() -> serde_json::Value {
 }
 
 async fn create_recipe(ctx: &common::TestContext) -> serde_json::Value {
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/recipes")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(serde_json::to_string(&recipe_json()).unwrap()))
         .unwrap();
 
@@ -54,13 +56,13 @@ async fn recipe_list_filters_by_status() {
     // Default status is "saved" — recipe should appear in default list (saved,tested)
     assert_eq!(created["status"], "saved");
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
 
     // Default list (no status filter = saved,tested) — should include the recipe
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -77,7 +79,7 @@ async fn recipe_list_filters_by_status() {
     let req = Request::builder()
         .method("GET")
         .uri("/api/recipes?status=discovered")
-        .header(&key, &value)
+        .with_auth(&auth)
         .body(Body::empty())
         .unwrap();
 
@@ -99,12 +101,12 @@ async fn recipe_status_transition_saved_to_tested() {
 
     assert_eq!(created["status"], "saved");
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("PATCH")
         .uri(format!("/api/recipes/{id}/status"))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "status": "tested" })).unwrap(),
         ))
@@ -127,12 +129,12 @@ async fn recipe_status_invalid_transition() {
     assert_eq!(created["status"], "saved");
 
     // saved -> discovered is not a valid transition
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("PATCH")
         .uri(format!("/api/recipes/{id}/status"))
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "status": "discovered" })).unwrap(),
         ))
@@ -146,12 +148,12 @@ async fn recipe_status_invalid_transition() {
 async fn discover_returns_503_without_model() {
     let ctx = common::TestContext::new().await;
 
-    let (key, value) = ctx.auth_header_1();
+    let auth = ctx.auth_1();
     let req = Request::builder()
         .method("POST")
         .uri("/api/discover")
         .header("Content-Type", "application/json")
-        .header(key, value)
+        .with_auth(&auth)
         .body(Body::from(
             serde_json::to_string(&json!({ "count": 1 })).unwrap(),
         ))

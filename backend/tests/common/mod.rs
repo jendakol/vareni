@@ -4,20 +4,59 @@ use std::sync::Arc;
 use testcontainers::runners::AsyncRunner;
 use testcontainers::{ContainerAsync, GenericImage, ImageExt};
 
+pub const USER1_SUB: &str = "sub-user-1";
+pub const USER2_SUB: &str = "sub-user-2";
+/// Nothing listens here, so lazy discovery fails fast in tests that don't mock the IdP.
+pub const UNREACHABLE_ISSUER: &str = "http://127.0.0.1:1";
+
+/// Session cookie + CSRF token of a seeded user.
+#[allow(dead_code)]
+#[derive(Clone)]
+pub struct TestAuth {
+    pub cookie: String,
+    pub csrf: String,
+}
+
+#[allow(dead_code)]
+pub trait WithAuth {
+    /// Adds the session cookie and the CSRF header (harmless on GET).
+    fn with_auth(self, auth: &TestAuth) -> Self;
+}
+
+impl WithAuth for axum::http::request::Builder {
+    fn with_auth(self, auth: &TestAuth) -> Self {
+        self.header("Cookie", &auth.cookie)
+            .header("X-CSRF-Token", &auth.csrf)
+    }
+}
+
 #[allow(dead_code)]
 pub struct TestContext {
     pub pool: PgPool,
     pub router: Router,
-    pub user1_token: String,
     pub user1_id: uuid::Uuid,
-    pub user2_token: String,
+    pub user1_auth: TestAuth,
     pub user2_id: uuid::Uuid,
+    pub user2_auth: TestAuth,
+    pub config: cooking_app::config::Config,
     _container: ContainerAsync<GenericImage>,
 }
 
 impl TestContext {
     #[allow(dead_code)]
     pub async fn new() -> Self {
+        Self::with_config(|_| {}).await
+    }
+
+    /// Context whose OIDC issuer points at `issuer_url` (e.g. a wiremock server).
+    #[allow(dead_code)]
+    pub async fn with_issuer(issuer_url: &str) -> Self {
+        let issuer_url = issuer_url.to_owned();
+        Self::with_config(move |c| c.oidc.as_mut().unwrap().issuer_url = issuer_url).await
+    }
+
+    #[allow(dead_code)]
+    pub async fn with_config(customize: impl FnOnce(&mut cooking_app::config::Config)) -> Self {
         let image = GenericImage::new("pgvector/pgvector", "pg18")
             .with_wait_for(testcontainers::core::WaitFor::message_on_stderr(
                 "database system is ready to accept connections",
@@ -43,34 +82,25 @@ impl TestContext {
             .await
             .expect("Failed to run migrations");
 
-        // Seed two test users
-        let password_hash = bcrypt::hash("testpass123", 4).expect("Failed to hash");
+        // Seed two test users linked to IdP subjects
+        let user1 = seed_user(&pool, "Test User 1", "user1@test.com", USER1_SUB).await;
+        let user2 = seed_user(&pool, "Test User 2", "user2@test.com", USER2_SUB).await;
 
-        let user1 = sqlx::query_as::<_, (uuid::Uuid,)>(
-            "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
-        )
-        .bind("Test User 1")
-        .bind("user1@test.com")
-        .bind(&password_hash)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to seed user1");
-
-        let user2 = sqlx::query_as::<_, (uuid::Uuid,)>(
-            "INSERT INTO users (name, email, password_hash) VALUES ($1, $2, $3) RETURNING id",
-        )
-        .bind("Test User 2")
-        .bind("user2@test.com")
-        .bind(&password_hash)
-        .fetch_one(&pool)
-        .await
-        .expect("Failed to seed user2");
-
-        let config = cooking_app::config::Config {
+        let mut config = cooking_app::config::Config {
             database_url,
             anthropic_api_key: String::new(),
-            jwt_secret: "test-secret-key-for-testing-12345".into(),
-            jwt_expiry_hours: 24,
+            environment: "test".into(),
+            cookie_secure: true,
+            session_ttl_hours: 24,
+            oidc: Some(cooking_app::config::OidcConfig {
+                issuer_url: UNREACHABLE_ISSUER.into(),
+                client_id: "vareni".into(),
+                client_secret: "test-client-secret".into(),
+                redirect_uri: "http://localhost:8080/api/auth/callback".into(),
+                post_logout_redirect_uri: "http://localhost:8080/".into(),
+                required_role: "vareni".into(),
+                role_claim: "roles".into(),
+            }),
             base_url: "http://localhost:8080".into(),
             static_dir: "./static".into(),
             upload_dir: std::env::temp_dir()
@@ -83,48 +113,73 @@ impl TestContext {
             metrics_gauge_refresh_secs: 60,
         };
 
-        let user1_token =
-            cooking_app::auth::encode_jwt(user1.0, &config.jwt_secret, config.jwt_expiry_hours)
-                .expect("Failed to encode JWT");
-        let user2_token =
-            cooking_app::auth::encode_jwt(user2.0, &config.jwt_secret, config.jwt_expiry_hours)
-                .expect("Failed to encode JWT");
+        customize(&mut config);
 
-        let state = cooking_app::AppState {
-            pool: pool.clone(),
-            config: Arc::new(config),
-            http_client: reqwest::Client::new(),
-            embedding: None, // Discovery disabled in tests
-            browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
-        };
-        let router = cooking_app::create_router(state);
+        let user1_auth = create_session(&pool, user1, 24).await;
+        let user2_auth = create_session(&pool, user2, 24).await;
+
+        let router = build_router(&pool, &config);
 
         Self {
             pool,
             router,
-            user1_token,
-            user1_id: user1.0,
-            user2_token,
-            user2_id: user2.0,
+            user1_id: user1,
+            user1_auth,
+            user2_id: user2,
+            user2_auth,
+            config,
             _container: container,
         }
     }
 
-    /// Build a request with auth header for user 1
+    /// Session auth for user 1
     #[allow(dead_code)]
-    pub fn auth_header_1(&self) -> (String, String) {
-        (
-            "Authorization".into(),
-            format!("Bearer {}", self.user1_token),
-        )
+    pub fn auth_1(&self) -> TestAuth {
+        self.user1_auth.clone()
     }
 
-    /// Build a request with auth header for user 2
+    /// Session auth for user 2
     #[allow(dead_code)]
-    pub fn auth_header_2(&self) -> (String, String) {
-        (
-            "Authorization".into(),
-            format!("Bearer {}", self.user2_token),
-        )
+    pub fn auth_2(&self) -> TestAuth {
+        self.user2_auth.clone()
+    }
+}
+
+/// Router over the same DB with a (possibly modified) config.
+#[allow(dead_code)]
+pub fn build_router(pool: &PgPool, config: &cooking_app::config::Config) -> Router {
+    let state = cooking_app::AppState {
+        pool: pool.clone(),
+        config: Arc::new(config.clone()),
+        http_client: reqwest::Client::new(),
+        embedding: None, // Discovery disabled in tests
+        browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        oidc: Arc::new(cooking_app::auth_oidc::Oidc::new().expect("OIDC client")),
+    };
+    cooking_app::create_router(state)
+}
+
+#[allow(dead_code)]
+pub async fn seed_user(pool: &PgPool, name: &str, email: &str, sub: &str) -> uuid::Uuid {
+    sqlx::query_scalar::<_, uuid::Uuid>(
+        "INSERT INTO users (name, email, external_id) VALUES ($1, $2, $3) RETURNING id",
+    )
+    .bind(name)
+    .bind(email)
+    .bind(sub)
+    .fetch_one(pool)
+    .await
+    .expect("Failed to seed user")
+}
+
+/// Real session row; negative `ttl_hours` creates an already expired session.
+#[allow(dead_code)]
+pub async fn create_session(pool: &PgPool, user_id: uuid::Uuid, ttl_hours: i64) -> TestAuth {
+    let session = cooking_app::db::sessions::create(pool, user_id, None, None, ttl_hours)
+        .await
+        .expect("Failed to create session");
+    TestAuth {
+        cookie: format!("{}={}", cooking_app::auth::SESSION_COOKIE, session.raw_id),
+        csrf: session.csrf_token,
     }
 }

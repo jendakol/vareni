@@ -47,6 +47,7 @@
 <script setup lang="ts">
 import { ref, nextTick } from 'vue'
 import { updateRecipe } from '../api/recipes'
+import { csrfToken } from '../api/client'
 
 const props = defineProps<{ recipeId: string }>()
 const emit = defineEmits<{ close: []; update: [] }>()
@@ -68,15 +69,23 @@ async function send() {
   streamText.value = ''
 
   try {
-    const token = localStorage.getItem('token')
     const resp = await fetch(`/api/chat/${props.recipeId}`, {
       method: 'POST',
+      credentials: 'same-origin',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`,
+        'X-CSRF-Token': csrfToken.value,
       },
       body: JSON.stringify({ message: text }),
     })
+
+    if (!resp.ok) {
+      const msg = resp.status === 401 ? 'Přihlášení vypršelo, přihlaste se znovu'
+        : resp.status === 403 ? 'Akce byla zamítnuta, obnovte stránku a zkuste to znovu'
+        : 'Chat je momentálně nedostupný'
+      messages.value.push({ role: 'assistant', text: msg })
+      return
+    }
 
     const reader = resp.body?.getReader()
     const decoder = new TextDecoder()

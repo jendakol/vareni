@@ -1,4 +1,6 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { useAuthStore } from './stores/auth'
+import { ApiError } from './api/client'
 
 const routes = [
   { path: '/', redirect: '/recipes' },
@@ -24,13 +26,18 @@ export const router = createRouter({
   },
 })
 
-// Navigation guard: redirect to login if not authenticated
-router.beforeEach((to) => {
-  const publicPaths = ['/login', '/r/']
-  const isPublic = publicPaths.some(p => to.path.startsWith(p))
-  const token = localStorage.getItem('token')
+// Navigation guard: require a valid session for non-public pages
+router.beforeEach(async (to) => {
+  if (to.path === '/login' || to.path.startsWith('/r/')) return
 
-  if (!isPublic && !token) {
-    return '/login'
+  const auth = useAuthStore()
+  if (auth.user) return
+
+  try {
+    await auth.fetchMe()
+  } catch (e) {
+    // Only a real 401 means logged out; outages must not look like logout
+    const error = e instanceof ApiError && e.status === 401 ? undefined : 'server_unavailable'
+    return { path: '/login', query: { ...(error && { error }), redirect: to.fullPath } }
   }
 })
