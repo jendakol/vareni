@@ -1,0 +1,31 @@
+# VCS and tooling
+.git
+.gitignore
+.idea
+.claude
+*.swp
+*.swo
+
+# Build artifacts (rebuilt inside the image)
+target
+backend/target
+frontend/node_modules
+frontend/dist
+frontend/tsconfig.tsbuildinfo
+
+# Secrets and local data
+.env
+.env.*
+!.env.example
+uploads
+models
+backups
+
+# Not needed for the image
+backend/tests
+docs
+tools
+*.md
+docker-compose.yml
+Dockerfile
+.dockerignore
