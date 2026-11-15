@@ -14,3 +14,4 @@ frontend/tsconfig.tsbuildinfo
 /docs/superpowers/plans/
 tools/embedding-bench/models
 tools/embedding-bench/target/
+/.superpowers/
