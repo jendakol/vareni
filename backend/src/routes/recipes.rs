@@ -167,12 +167,48 @@ pub async fn unshare(
 }
 
 fn generate_slug(title: &str) -> String {
+    use rand::Rng;
+    const ALPHABET: &[u8] = b"0123456789abcdefghijklmnopqrstuvwxyz";
     let base: String = title
         .to_lowercase()
         .chars()
         .map(|c| if c.is_alphanumeric() { c } else { '-' })
         .collect::<String>();
     let base = base.trim_matches('-').replace("--", "-");
-    let suffix: u32 = rand::random::<u32>() % 10000;
-    format!("{}-{suffix:04}", &base[..base.len().min(40)])
+    let base: String = base.chars().take(40).collect();
+    let base = base.trim_end_matches('-');
+    let mut rng = rand::rng();
+    let suffix: String = (0..8)
+        .map(|_| ALPHABET[rng.random_range(0..ALPHABET.len())] as char)
+        .collect();
+    format!("{base}-{suffix}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::generate_slug;
+
+    #[test]
+    fn slug_truncates_multibyte_title_without_panic() {
+        let s = generate_slug(&"čřžýáíé".repeat(10));
+        assert!(s.starts_with("čřžýáíé"));
+    }
+
+    #[test]
+    fn slug_truncates_at_mid_char_byte_boundary() {
+        let s = generate_slug(&format!("a{}", "č".repeat(30)));
+        assert!(s.starts_with("ačč"));
+    }
+
+    #[test]
+    fn slug_suffix_is_8_base36_chars() {
+        let s = generate_slug("Svíčková");
+        let suffix = s.rsplit('-').next().unwrap();
+        assert_eq!(suffix.len(), 8);
+        assert!(
+            suffix
+                .chars()
+                .all(|c| c.is_ascii_digit() || c.is_ascii_lowercase())
+        );
+    }
 }
