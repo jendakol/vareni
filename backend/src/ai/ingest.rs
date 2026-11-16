@@ -86,6 +86,9 @@ pub struct ParsedRecipe {
     pub sections: Vec<ParsedSection>,
     #[serde(default)]
     pub guessed_fields: Vec<String>,
+    /// Set only by `parse_url`; the LLM never produces it.
+    #[serde(default)]
+    pub cover_image_url: Option<String>,
 }
 
 pub async fn parse_text(client: &AnthropicClient, text: &str) -> anyhow::Result<ParsedRecipe> {
@@ -445,6 +448,62 @@ fn extract_recipe_from_jsonld(value: &serde_json::Value) -> Option<String> {
     None
 }
 
+fn jsonld_image(value: &serde_json::Value) -> Option<String> {
+    match value {
+        serde_json::Value::Object(obj) => {
+            if obj.get("@type").and_then(|v| v.as_str()) == Some("Recipe")
+                && let Some(img) = obj.get("image")
+                && let Some(u) = image_value_url(img)
+            {
+                return Some(u);
+            }
+            obj.get("@graph").and_then(jsonld_image)
+        }
+        serde_json::Value::Array(arr) => arr.iter().find_map(jsonld_image),
+        _ => None,
+    }
+}
+
+fn image_value_url(v: &serde_json::Value) -> Option<String> {
+    match v {
+        serde_json::Value::String(s) => Some(s.clone()),
+        serde_json::Value::Array(a) => a.first().and_then(image_value_url),
+        serde_json::Value::Object(o) => o.get("url").and_then(|u| u.as_str()).map(String::from),
+        _ => None,
+    }
+}
+
+/// Cover candidate: `og:image` (or its secure variant), else the JSON-LD Recipe `image`.
+/// Resolved against `base_url`; only http(s) results are returned.
+pub fn extract_cover_image_url(document: &scraper::Html, base_url: &str) -> Option<String> {
+    let base = url::Url::parse(base_url).ok()?;
+    let mut candidates: Vec<String> = Vec::new();
+    if let Ok(sel) = scraper::Selector::parse(
+        r#"meta[property="og:image"], meta[property="og:image:secure_url"]"#,
+    ) {
+        candidates.extend(
+            document
+                .select(&sel)
+                .filter_map(|m| m.value().attr("content"))
+                .map(|c| c.trim().to_string()),
+        );
+    }
+    if let Ok(sel) = scraper::Selector::parse(r#"script[type="application/ld+json"]"#) {
+        for el in document.select(&sel) {
+            let text = el.text().collect::<String>();
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&text)
+                && let Some(u) = jsonld_image(&v)
+            {
+                candidates.push(u.trim().to_string());
+            }
+        }
+    }
+    candidates.into_iter().find_map(|c| {
+        let resolved = base.join(&c).ok()?;
+        matches!(resolved.scheme(), "http" | "https").then(|| resolved.to_string())
+    })
+}
+
 pub async fn parse_url(
     client: &AnthropicClient,
     http_client: &reqwest::Client,
@@ -502,8 +561,9 @@ pub async fn parse_url(
     // Non-Instagram: try JSON-LD structured data first, then fall back to HTML text.
     // Scoped to drop the scraper::Html before the async parse_text call
     // (scraper::Html uses tendril::NonAtomic which is !Send).
-    let (text, jsonld_meta) = {
+    let (text, jsonld_meta, cover_image_url) = {
         let document = scraper::Html::parse_document(&html);
+        let cover = extract_cover_image_url(&document, &final_url);
         let meta = extract_jsonld_metadata(&document);
         let text = extract_jsonld_recipe(&document).unwrap_or_else(|| {
             // Fallback: extract readable text from article/main/body
@@ -518,7 +578,7 @@ pub async fn parse_url(
                 })
                 .unwrap_or_else(|| document.root_element().text().collect::<Vec<_>>().join(" "))
         });
-        (text, meta)
+        (text, meta, cover)
     };
 
     // Truncate to ~8000 chars to stay within token limits
@@ -533,6 +593,7 @@ pub async fn parse_url(
     };
 
     let mut recipe = parse_text(client, &text).await?;
+    recipe.cover_image_url = cover_image_url;
 
     // Supplement AI output with structured data from JSON-LD (more reliable than AI extraction)
     // Times go on the first section (per spec: single total goes on first section).
@@ -819,5 +880,55 @@ mod tests {
 
         let meta = extract_jsonld_metadata(&document).expect("should extract metadata");
         assert_eq!(meta.servings, Some(4));
+    }
+
+    // -- extract_cover_image_url --
+
+    fn cover(html: &str, base: &str) -> Option<String> {
+        extract_cover_image_url(&scraper::Html::parse_document(html), base)
+    }
+
+    #[test]
+    fn extracts_og_image_relative() {
+        let html = r#"<html><head><meta property="og:image" content="/img/a.jpg"></head></html>"#;
+        assert_eq!(
+            cover(html, "https://x.cz/r/1").as_deref(),
+            Some("https://x.cz/img/a.jpg")
+        );
+    }
+
+    #[test]
+    fn falls_back_to_jsonld_image_array() {
+        let html = r#"<script type="application/ld+json">{"@type":"Recipe","image":["https://x.cz/a.jpg","https://x.cz/b.jpg"]}</script>"#;
+        assert_eq!(
+            cover(html, "https://x.cz/r").as_deref(),
+            Some("https://x.cz/a.jpg")
+        );
+    }
+
+    #[test]
+    fn jsonld_image_object_url() {
+        let html = r#"<script type="application/ld+json">{"@graph":[{"@type":"Recipe","image":{"@type":"ImageObject","url":"/p.jpg"}}]}</script>"#;
+        assert_eq!(
+            cover(html, "https://x.cz/r").as_deref(),
+            Some("https://x.cz/p.jpg")
+        );
+    }
+
+    #[test]
+    fn og_image_secure_url_is_accepted() {
+        let html = r#"<meta property="og:image:secure_url" content="https://x.cz/s.jpg">"#;
+        assert_eq!(
+            cover(html, "https://x.cz/r").as_deref(),
+            Some("https://x.cz/s.jpg")
+        );
+    }
+
+    #[test]
+    fn ignores_data_and_javascript_urls() {
+        let html = r#"<meta property="og:image" content="data:image/png;base64,AAAA">"#;
+        assert_eq!(cover(html, "https://x.cz/r"), None);
+        let html = r#"<meta property="og:image" content="javascript:alert(1)">"#;
+        assert_eq!(cover(html, "https://x.cz/r"), None);
     }
 }

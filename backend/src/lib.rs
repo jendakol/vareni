@@ -1,6 +1,7 @@
 use std::sync::Arc;
 
 use axum::Router;
+use axum::extract::DefaultBodyLimit;
 use axum::routing::{get, patch, post, put};
 use tokio::sync::Semaphore;
 use tower_http::services::{ServeDir, ServeFile};
@@ -16,11 +17,17 @@ pub mod config;
 pub mod db;
 pub mod embedding;
 pub mod error;
+pub mod image_store;
+pub mod images;
 pub mod metrics;
 pub mod models;
 pub mod routes;
+pub mod safe_fetch;
 pub mod scraper;
 pub mod validation;
+
+/// Body cap for multipart routes carrying photos (per image: `images::MAX_INPUT_BYTES`).
+const UPLOAD_BODY_LIMIT: usize = 100 * 1024 * 1024;
 
 #[derive(Clone)]
 pub struct AppState {
@@ -29,7 +36,10 @@ pub struct AppState {
     pub http_client: reqwest::Client,
     pub embedding: Option<Arc<embedding::EmbeddingService>>,
     pub browser_semaphore: Arc<Semaphore>,
+    pub image_semaphore: Arc<Semaphore>,
+    pub image_fetch_semaphore: Arc<Semaphore>,
     pub oidc: Arc<auth_oidc::Oidc>,
+    pub image_fetch: safe_fetch::ImageFetcher,
 }
 
 #[cfg(feature = "debug-auth")]
@@ -72,10 +82,25 @@ pub fn create_router(state: AppState) -> Router {
             "/recipes/{id}/share",
             post(routes::recipes::share).delete(routes::recipes::unshare),
         )
+        .route(
+            "/recipes/{id}/images",
+            post(routes::images::upload).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
+        .route(
+            "/recipes/{id}/images/{image_id}",
+            axum::routing::delete(routes::images::delete),
+        )
+        .route(
+            "/recipes/{id}/images/{image_id}/{variant}",
+            get(routes::images::serve),
+        )
         // Discovery
         .route("/discover", post(routes::discover::discover))
         // Ingestion
-        .route("/ingest", post(routes::ingest::ingest))
+        .route(
+            "/ingest",
+            post(routes::ingest::ingest).layer(DefaultBodyLimit::max(UPLOAD_BODY_LIMIT)),
+        )
         // Chat
         .route("/chat/{recipe_id}", post(routes::chat::chat))
         // Meal plan (suggest BEFORE {id} to avoid conflict)
@@ -104,11 +129,14 @@ pub fn create_router(state: AppState) -> Router {
             "/public/recipes/{slug}",
             get(routes::public::get_recipe_by_slug),
         )
+        .route(
+            "/public/recipes/{slug}/cover/{variant}",
+            get(routes::public::get_cover),
+        )
         // Log API (Home Assistant)
         .route("/log", post(routes::log::create_entry));
 
     let static_dir = state.config.static_dir.clone();
-    let upload_dir = state.config.upload_dir.clone();
 
     Router::new()
         .nest("/api", api)
@@ -116,7 +144,6 @@ pub fn create_router(state: AppState) -> Router {
             "/metrics",
             get(move || async move { prometheus_handle.render() }),
         )
-        .nest_service("/uploads", ServeDir::new(&upload_dir))
         .fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )

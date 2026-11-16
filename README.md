@@ -166,7 +166,7 @@ Přihlášení řeší Keycloak (authorization code + PKCE, server drží sessio
 6. `OIDC_ISSUER_URL` musí přesně odpovídat `iss` v tokenu (veřejné URL, ne interní hostname).
 
 ### Pořadí nasazení
-1. `pg_dump` a ověření obnovy.
+1. `pg_dump` a ověření obnovy. Zálohujte i volume `uploads` (obrázky receptů), viz [Zálohy](#zálohy-a-obrázky).
 2. Nastavit Keycloak a `.env`.
 3. Nasadit nový image (aplikuje migraci 009; do nasazení seedu každý dostane 403).
 4. Propojit uživatele: `UPDATE users SET external_id = '<sub>' WHERE name = '<jméno>';`
@@ -184,8 +184,19 @@ Příkazy vyžadují `DATABASE_URL`. Odebrání role v Keycloaku existující se
 ### Poznámky
 - Odhlášení volá Keycloak end_session, takže ukončí SSO pro celý realm.
 - `OIDC_ROLE_CLAIM` nesmí ukazovat na claim, který si uživatel může sám upravit (např. atribut profilu).
-- `/uploads` a `/metrics` jsou bez autentizace.
+- `/metrics` je bez autentizace.
 - `POST /api/log` (Home Assistant) dál používá statický Bearer `LOG_API_TOKEN`.
+
+## Zálohy a obrázky
+
+Obrázky receptů leží ve volume `uploads` (`/app/uploads`) a obsluhují se jen přihlášeným uživatelům, kromě obálky veřejně sdíleného receptu. Zálohujte je spolu s `pg_dump` (u `docker run` se volume jmenuje `vareni-uploads`, u Compose má prefix projektu, např. `vareni_uploads`):
+
+```bash
+docker run --rm -v vareni-uploads:/data -v $PWD:/backup alpine tar czf /backup/uploads.tgz -C /data .   # záloha
+docker run --rm -v vareni-uploads:/data -v $PWD:/backup alpine tar xzf /backup/uploads.tgz -C /data     # obnova
+```
+
+Reverse proxy před aplikací musí povolit těla požadavků alespoň 100 MB (limit aplikace), např. v nginx `client_max_body_size 100m;`.
 
 ## Konfigurace
 

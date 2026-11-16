@@ -270,8 +270,9 @@
       </label>
     </div>
 
-    <button type="submit" class="w-full py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium text-lg">
-      Uložit recept
+    <button type="submit" :disabled="!!saving"
+      class="w-full min-h-[44px] py-3 bg-orange-600 text-white rounded-lg hover:bg-orange-700 font-medium text-lg disabled:opacity-50">
+      {{ saving || 'Uložit recept' }}
     </button>
   </form>
 </template>
@@ -281,7 +282,7 @@ import { reactive, ref, computed, watch } from 'vue'
 import draggable from 'vuedraggable'
 import type { CookMethod, Section } from '../api/recipes'
 
-const props = defineProps<{ initial?: any }>()
+const props = defineProps<{ initial?: any; saving?: string | null }>()
 const emit = defineEmits<{ save: [data: any] }>()
 
 // ─── Guessed-fields highlight ───────────────────────────────────────────────
@@ -658,6 +659,7 @@ function toPayload() {
 }
 
 function handleSubmit() {
+  if (props.saving) return
   emit('save', toPayload())
 }
 

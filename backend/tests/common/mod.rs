@@ -104,13 +104,14 @@ impl TestContext {
             base_url: "http://localhost:8080".into(),
             static_dir: "./static".into(),
             upload_dir: std::env::temp_dir()
-                .join(format!("cooking-test-{}", uuid::Uuid::new_v4()))
+                .join(format!("vareni-test-{}", uuid::Uuid::new_v4()))
                 .to_string_lossy()
                 .into_owned(),
             embedding_model_dir: None,
             discovery_enabled: false,
             log_api_token: Some("test-log-token".into()),
             metrics_gauge_refresh_secs: 60,
+            image_fetch_allow_private: false,
         };
 
         customize(&mut config);
@@ -154,7 +155,11 @@ pub fn build_router(pool: &PgPool, config: &cooking_app::config::Config) -> Rout
         http_client: reqwest::Client::new(),
         embedding: None, // Discovery disabled in tests
         browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        image_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+        image_fetch_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         oidc: Arc::new(cooking_app::auth_oidc::Oidc::new().expect("OIDC client")),
+        image_fetch: cooking_app::safe_fetch::ImageFetcher::new(config.image_fetch_allow_private)
+            .expect("image fetcher"),
     };
     cooking_app::create_router(state)
 }

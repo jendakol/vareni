@@ -20,6 +20,8 @@ pub struct Config {
     pub log_api_token: Option<String>,
     // Metrics
     pub metrics_gauge_refresh_secs: u64,
+    /// Never read from the environment: always `false` outside tests.
+    pub image_fetch_allow_private: bool,
 }
 
 impl Config {
@@ -56,6 +58,7 @@ impl Config {
                 .unwrap_or_else(|_| "60".into())
                 .parse()
                 .unwrap_or(60),
+            image_fetch_allow_private: false,
         })
     }
 

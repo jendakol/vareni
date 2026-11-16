@@ -19,7 +19,13 @@ pub async fn create(
     Json(body): Json<CreateRecipeRequest>,
 ) -> AppResult<(StatusCode, Json<RecipeDetail>)> {
     // source_url is validated in db::recipes::create — the actual write sink.
-    let recipe = db::recipes::create(&state.pool, auth.user_id, &body).await?;
+    let mut recipe = db::recipes::create(&state.pool, auth.user_id, &body).await?;
+    if let Some(url) = body.cover_image_url.as_deref().filter(|u| !u.is_empty()) {
+        crate::image_store::attach_cover_from_url(&state, recipe.recipe.id, url).await;
+        if let Some(fresh) = db::recipes::get_by_id(&state.pool, recipe.recipe.id).await? {
+            recipe = fresh;
+        }
+    }
     Ok((StatusCode::CREATED, Json(recipe)))
 }
 
@@ -85,6 +91,7 @@ pub async fn delete(
 ) -> AppResult<StatusCode> {
     let deleted = db::recipes::delete(&state.pool, id).await?;
     if deleted {
+        crate::image_store::remove_recipe_dir(&state.config.upload_dir, id).await;
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(AppError::NotFound)

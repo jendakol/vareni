@@ -99,13 +99,18 @@ async fn main() -> anyhow::Result<()> {
         None
     };
 
+    std::fs::create_dir_all(std::path::Path::new(&config.upload_dir).join("recipes"))?;
+
     let state = AppState {
         pool,
         config: Arc::new(config),
         http_client,
         embedding,
         browser_semaphore: Arc::new(tokio::sync::Semaphore::new(1)),
+        image_semaphore: Arc::new(tokio::sync::Semaphore::new(2)),
+        image_fetch_semaphore: Arc::new(tokio::sync::Semaphore::new(4)),
         oidc: Arc::new(auth_oidc::Oidc::new()?),
+        image_fetch: cooking_app::safe_fetch::ImageFetcher::new(false)?,
     };
 
     let app = create_router(state);

@@ -52,10 +52,7 @@ pub async fn ingest(
             }
             "image" => {
                 let content_type = field.content_type().unwrap_or("image/jpeg").to_string();
-                let data = field
-                    .bytes()
-                    .await
-                    .map_err(|e| AppError::BadRequest(e.to_string()))?;
+                let data = crate::routes::images::read_capped(field).await?;
                 images.push((data, content_type));
             }
             _ => {}

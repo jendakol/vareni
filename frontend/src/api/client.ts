@@ -1,6 +1,6 @@
 import { ref } from 'vue'
 
-const BASE = '/api'
+export const BASE = '/api'
 
 // CSRF token from /auth/me, sent on every state-changing request
 export const csrfToken = ref('')
@@ -18,7 +18,7 @@ function isPublicPath(path: string) {
   return path === '/login' || path.startsWith('/r/')
 }
 
-function redirectToLogin() {
+export function redirectToLogin() {
   if (isPublicPath(window.location.pathname)) return
   const back = encodeURIComponent(window.location.pathname + window.location.search)
   window.location.href = `/login?error=session_expired&redirect=${back}`

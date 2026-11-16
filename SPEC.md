@@ -540,7 +540,7 @@ UPLOAD_DIR=./uploads
 SQLX_OFFLINE=true
 ```
 
-**Image storage:** `UPLOAD_DIR` must point to a persistent location. In Docker, mount a host volume to `/app/uploads` (declared as `VOLUME` in the Dockerfile). Images are served by Axum at `/uploads/*` via `ServeDir`.
+**Image storage:** `UPLOAD_DIR` must point to a persistent location. In Docker, mount a host volume to `/app/uploads` (declared as `VOLUME` in the Dockerfile). Images are not served statically: authenticated routes under `/api/recipes/{id}/images/...` stream them, and a recipe's cover is public via `/api/public/recipes/{slug}/cover/{full|thumb}`.
 
 ---
 

@@ -444,5 +444,13 @@ async fn process_candidate(
     )
     .await?;
 
+    if let Some(cover_url) = parsed.cover_image_url.clone() {
+        let state = state.clone();
+        let recipe_id = recipe.id;
+        tokio::spawn(async move {
+            crate::image_store::attach_cover_from_url(&state, recipe_id, &cover_url).await;
+        });
+    }
+
     Ok(CandidateResult::Discovered(Box::new(recipe)))
 }

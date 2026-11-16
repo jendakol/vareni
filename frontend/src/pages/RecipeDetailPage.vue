@@ -1,7 +1,8 @@
 <template>
   <div v-if="recipe">
-    <!-- View mode -->
-    <div v-if="!editing">
+    <!-- View mode: v-show keeps RecipeImages (pending/failed uploads) mounted while editing -->
+    <div v-show="!editing">
+      <RecipeImages :key="recipe.id" :recipe="recipe" part="cover" @changed="refreshRecipe" />
       <div class="flex items-start justify-between mb-4">
         <div class="flex items-center gap-2 flex-wrap">
           <h1 class="text-2xl font-bold text-stone-800">
@@ -40,6 +41,8 @@
           + přidat odkaz
         </button>
       </div>
+
+      <RecipeImages :key="recipe.id" :recipe="recipe" part="screenshots" @changed="refreshRecipe" />
 
       <div class="flex items-center gap-2 mb-4 flex-wrap">
         <template v-if="recipe.status === 'discovered'">
@@ -110,7 +113,7 @@
     </div>
 
     <!-- Edit mode -->
-    <div v-else>
+    <div v-if="editing">
       <div class="flex items-center justify-between mb-4">
         <h2 class="text-lg font-semibold text-stone-700">Upravit recept</h2>
         <button @click="leaveEdit" class="text-stone-500 hover:text-stone-700 text-sm">← Zpět</button>
@@ -141,6 +144,7 @@ import StepList from '../components/StepList.vue'
 import CookingMode from '../components/CookingMode.vue'
 import ChatOverlay from '../components/ChatOverlay.vue'
 import RecipeForm from '../components/RecipeForm.vue'
+import RecipeImages from '../components/RecipeImages.vue'
 import { useRecipeStore } from '../stores/recipes'
 
 const route = useRoute()
@@ -353,7 +357,9 @@ async function handleDelete() {
   const summary = sectionCount > 1
     ? `Obsahuje ${sectionCount} ${sectionWord}, ${ingCount} ingrediencí, ${stepCount} kroků.`
     : `Obsahuje ${ingCount} ingrediencí, ${stepCount} kroků.`
-  if (!confirm(`Smazat recept „${recipe.value.title}"? ${summary} Akce je nevratná.`)) return
+  const photos = (recipe.value.cover_image_id ? 1 : 0) + (recipe.value.screenshots?.length ?? 0)
+  const withPhotos = photos > 0 ? ` včetně ${photos} ${photos === 1 ? 'fotky' : 'fotek'}` : ''
+  if (!confirm(`Smazat recept „${recipe.value.title}"${withPhotos}? ${summary} Akce je nevratná.`)) return
   try {
     await api.deleteRecipe(recipe.value.id)
     store.removeRecipe(recipe.value.id)

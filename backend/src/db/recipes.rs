@@ -16,7 +16,8 @@ const RECIPE_COLUMNS: &str = "r.id, r.owner_id, r.title, r.description, r.servin
     (SELECT SUM(prep_time_min)::int FROM recipe_sections WHERE recipe_id = r.id) AS prep_time_min, \
     (SELECT SUM(cook_time_min)::int FROM recipe_sections WHERE recipe_id = r.id) AS cook_time_min, \
     r.source_type, r.source_url, r.emoji, \
-    r.cover_image_path, r.is_public, r.public_slug, r.created_at, r.updated_at, \
+    (SELECT id FROM recipe_images WHERE recipe_id = r.id AND kind = 'cover') AS cover_image_id, \
+    r.is_public, r.public_slug, r.created_at, r.updated_at, \
     r.status, r.discovery_score, r.discovered_at, r.scored_at, r.canonical_name";
 
 pub async fn create(
@@ -209,10 +210,12 @@ async fn assemble_detail(pool: &PgPool, recipe: Recipe) -> Result<RecipeDetail, 
         })
         .collect();
 
+    let screenshots = crate::db::images::list_screenshots(pool, recipe.id).await?;
     Ok(RecipeDetail {
         recipe,
         sections: sections_with_content,
         tags,
+        screenshots,
     })
 }
 
@@ -550,6 +553,13 @@ pub async fn update(
 
     tx.commit().await?;
     get_by_id(pool, id).await
+}
+
+pub async fn exists(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {
+    sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM recipes WHERE id = $1)")
+        .bind(id)
+        .fetch_one(pool)
+        .await
 }
 
 pub async fn delete(pool: &PgPool, id: Uuid) -> Result<bool, sqlx::Error> {

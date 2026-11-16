@@ -33,6 +33,12 @@ export interface Section {
   steps: Step[]
 }
 
+export interface ImageRef {
+  id: string
+  width: number
+  height: number
+}
+
 export interface Recipe {
   id: string
   title: string
@@ -43,6 +49,8 @@ export interface Recipe {
   /** Derived sum over sections */
   cook_time_min: number | null
   emoji: string | null
+  cover_image_id: string | null
+  screenshots?: ImageRef[]
   source_type: string | null
   source_url: string | null
   tags?: string[]
@@ -54,6 +62,24 @@ export interface Recipe {
   discovered_at: string | null
   scored_at: string | null
   canonical_name: string | null
+}
+
+/** Share-page DTO: no owner, status, discovery data or screenshots */
+export interface PublicRecipe {
+  id: string
+  title: string
+  description: string | null
+  servings: number | null
+  prep_time_min: number | null
+  cook_time_min: number | null
+  emoji: string | null
+  cover_image_id: string | null
+  source_type: string | null
+  source_url: string | null
+  is_public: boolean | null
+  public_slug: string | null
+  tags: string[]
+  sections: Section[]
 }
 
 export interface Paginated<T> {
@@ -84,7 +110,7 @@ export function getRecipe(id: string) {
   return apiFetch<Recipe>(`/recipes/${id}`)
 }
 
-export function createRecipe(data: any) {
+export function createRecipe(data: { cover_image_url?: string | null; [key: string]: any }) {
   return apiFetch<Recipe>('/recipes', { method: 'POST', body: JSON.stringify(data) })
 }
 
@@ -104,10 +130,17 @@ export function unshareRecipe(id: string) {
   return apiFetch<void>(`/recipes/${id}/share`, { method: 'DELETE' })
 }
 
+/** Result of /ingest; cover_image_url is a remote og:image candidate */
+export interface ParsedRecipe {
+  title: string
+  cover_image_url?: string | null
+  [key: string]: any
+}
+
 export function ingest(formData: FormData) {
-  return apiFetch<any>('/ingest', { method: 'POST', body: formData })
+  return apiFetch<ParsedRecipe>('/ingest', { method: 'POST', body: formData })
 }
 
 export function getPublicRecipe(slug: string) {
-  return apiFetch<Recipe>(`/public/recipes/${slug}`)
+  return apiFetch<PublicRecipe>(`/public/recipes/${slug}`)
 }

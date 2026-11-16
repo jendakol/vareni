@@ -1,15 +1,38 @@
 <template>
-  <a :href="`/recipes/${recipe.id}`" @click.prevent="$router.push(`/recipes/${recipe.id}`)"
+  <!-- Grid tile (Moje tab) -->
+  <a v-if="tile" :href="`/recipes/${recipe.id}`" @click.prevent="$router.push(`/recipes/${recipe.id}`)"
+    class="block rounded-xl overflow-hidden hover:shadow-md transition-shadow"
+    :class="cardClass" :title="statusLabel">
+    <div class="aspect-square bg-stone-100 flex items-center justify-center overflow-hidden">
+      <img v-if="thumbSrc" :src="thumbSrc" :alt="recipe.title" loading="lazy"
+        class="w-full h-full object-cover" />
+      <span v-else class="text-5xl leading-none">{{ recipe.emoji || '🍽️' }}</span>
+    </div>
+    <div class="p-2.5">
+      <h3 class="text-sm font-semibold text-stone-800 break-words">{{ recipe.title }}</h3>
+      <p v-if="totalTime" class="flex items-center gap-1 mt-1 text-xs text-stone-500">
+        <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+        {{ totalTime }} min
+      </p>
+    </div>
+  </a>
+
+  <!-- Row (Objevené / Odmítnuté) -->
+  <a v-else :href="`/recipes/${recipe.id}`" @click.prevent="$router.push(`/recipes/${recipe.id}`)"
     class="block rounded-xl p-4 hover:shadow-md transition-shadow"
     :class="cardClass" :title="statusLabel">
     <div class="flex items-start gap-3">
-      <span v-if="recipe.emoji" class="text-5xl sm:text-3xl leading-none">{{ recipe.emoji }}</span>
+      <div class="w-16 h-16 shrink-0 rounded-lg bg-stone-100 flex items-center justify-center overflow-hidden">
+        <img v-if="thumbSrc" :src="thumbSrc" :alt="recipe.title" loading="lazy"
+          class="w-full h-full object-cover" />
+        <span v-else class="text-3xl leading-none">{{ recipe.emoji || '🍽️' }}</span>
+      </div>
       <h3 class="font-semibold text-stone-800 text-xl">{{ recipe.title }}</h3>
     </div>
-    <div v-if="recipe.prep_time_min || recipe.cook_time_min" class="flex items-center gap-4 mt-3 text-sm text-stone-500">
+    <div v-if="totalTime" class="flex items-center gap-4 mt-3 text-sm text-stone-500">
       <span class="flex items-center gap-1">
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-        {{ (recipe.prep_time_min || 0) + (recipe.cook_time_min || 0) }} min
+        {{ totalTime }} min
       </span>
     </div>
 
@@ -58,9 +81,15 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import type { Recipe } from '../api/recipes'
+import { imageUrl } from '../api/images'
 
-const props = defineProps<{ recipe: Recipe }>()
+const props = defineProps<{ recipe: Recipe; tile?: boolean }>()
 const emit = defineEmits<{ status: [id: string, status: string] }>()
+
+const thumbSrc = computed(() =>
+  props.recipe.cover_image_id ? imageUrl(props.recipe.id, props.recipe.cover_image_id, 'thumb') : '')
+
+const totalTime = computed(() => (props.recipe.prep_time_min || 0) + (props.recipe.cook_time_min || 0))
 
 function confirmRejectSimilar() {
   if (window.confirm('Opravdu odmítnout tento recept a blokovat podobné v budoucnu? Toto ovlivní objevování pro všechny uživatele. (Lze vrátit v záložce Odmítnuté.)')) {

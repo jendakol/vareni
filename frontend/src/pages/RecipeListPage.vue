@@ -49,9 +49,11 @@
     <div v-else-if="!store.loading && store.recipes.length === 0" class="text-center text-stone-400 py-8">
       {{ activeTab === 'mine' ? 'Žádné recepty' : activeTab === 'discovered' ? 'Žádné objevené recepty' : 'Žádné odmítnuté recepty' }}
     </div>
-    <div v-else class="space-y-3">
-      <RecipeCard v-for="recipe in store.recipes" :key="recipe.id" :recipe="recipe"
-        @status="handleStatusChange" />
+    <div v-else>
+      <div :class="activeTab === 'mine' ? 'grid grid-cols-2 gap-3' : 'space-y-3'">
+        <RecipeCard v-for="recipe in store.recipes" :key="recipe.id" :recipe="recipe"
+          :tile="activeTab === 'mine'" @status="handleStatusChange" />
+      </div>
       <div ref="sentinel" class="h-px"></div>
       <p v-if="store.loadingMore" class="text-center text-stone-500 py-4">Načítám…</p>
       <div v-else-if="store.moreError" class="text-center py-4">

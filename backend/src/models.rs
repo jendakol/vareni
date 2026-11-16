@@ -74,7 +74,7 @@ pub struct Recipe {
     pub source_type: Option<String>,
     pub source_url: Option<String>,
     pub emoji: Option<String>,
-    pub cover_image_path: Option<String>,
+    pub cover_image_id: Option<Uuid>,
     pub is_public: Option<bool>,
     pub public_slug: Option<String>,
     pub created_at: Option<OffsetDateTime>,
@@ -87,6 +87,47 @@ pub struct Recipe {
     pub discovered_at: Option<OffsetDateTime>,
     pub scored_at: Option<OffsetDateTime>,
     pub canonical_name: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ImageKind {
+    Cover,
+    Screenshot,
+}
+
+impl ImageKind {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Cover => "cover",
+            Self::Screenshot => "screenshot",
+        }
+    }
+
+    pub fn parse(s: &str) -> Option<Self> {
+        match s {
+            "cover" => Some(Self::Cover),
+            "screenshot" => Some(Self::Screenshot),
+            _ => None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct RecipeImage {
+    pub id: Uuid,
+    pub recipe_id: Uuid,
+    pub kind: String,
+    pub width: i32,
+    pub height: i32,
+    pub created_at: OffsetDateTime,
+}
+
+#[derive(Debug, Clone, FromRow, Serialize)]
+pub struct ImageRef {
+    pub id: Uuid,
+    pub width: i32,
+    pub height: i32,
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -115,6 +156,53 @@ pub struct RecipeDetail {
     pub recipe: Recipe,
     pub sections: Vec<RecipeSectionWithContent>,
     pub tags: Vec<String>,
+    pub screenshots: Vec<ImageRef>,
+}
+
+/// Recipe as exposed on the unauthenticated share page: no owner, status,
+/// discovery data or screenshots.
+#[derive(Debug, Serialize)]
+pub struct PublicRecipe {
+    pub id: Uuid,
+    pub title: String,
+    pub description: Option<String>,
+    pub servings: Option<i32>,
+    pub prep_time_min: Option<i32>,
+    pub cook_time_min: Option<i32>,
+    pub source_type: Option<String>,
+    pub source_url: Option<String>,
+    pub emoji: Option<String>,
+    pub cover_image_id: Option<Uuid>,
+    pub is_public: Option<bool>,
+    pub public_slug: Option<String>,
+    pub created_at: Option<OffsetDateTime>,
+    pub updated_at: Option<OffsetDateTime>,
+    pub sections: Vec<RecipeSectionWithContent>,
+    pub tags: Vec<String>,
+}
+
+impl From<RecipeDetail> for PublicRecipe {
+    fn from(d: RecipeDetail) -> Self {
+        let r = d.recipe;
+        Self {
+            id: r.id,
+            title: r.title,
+            description: r.description,
+            servings: r.servings,
+            prep_time_min: r.prep_time_min,
+            cook_time_min: r.cook_time_min,
+            source_type: r.source_type,
+            source_url: r.source_url,
+            emoji: r.emoji,
+            cover_image_id: r.cover_image_id,
+            is_public: r.is_public,
+            public_slug: r.public_slug,
+            created_at: r.created_at,
+            updated_at: r.updated_at,
+            sections: d.sections,
+            tags: d.tags,
+        }
+    }
 }
 
 #[derive(Debug, Clone, FromRow, Serialize)]
@@ -176,6 +264,9 @@ pub struct CreateRecipeRequest {
     pub source_type: Option<String>,
     pub source_url: Option<String>,
     pub tags: Option<Vec<String>>,
+    /// Best-effort cover fetched server-side after creation.
+    #[serde(default)]
+    pub cover_image_url: Option<String>,
     /// Must contain ≥1 section.
     pub sections: Vec<SectionInput>,
 }
