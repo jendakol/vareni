@@ -100,7 +100,7 @@ function confirmRejectSimilar() {
 const cardClass = computed(() => {
   switch (props.recipe.status) {
     case 'tested':
-      return 'border-2 border-green-500 bg-white'
+      return 'border-2 border-stone-300 bg-white'
     case 'saved':
       return 'border-2 border-orange-400 bg-white'
     case 'discovered':

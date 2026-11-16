@@ -50,7 +50,7 @@
       {{ activeTab === 'mine' ? 'Žádné recepty' : activeTab === 'discovered' ? 'Žádné objevené recepty' : 'Žádné odmítnuté recepty' }}
     </div>
     <div v-else>
-      <div :class="activeTab === 'mine' ? 'grid grid-cols-2 gap-3' : 'space-y-3'">
+      <div :class="activeTab === 'mine' ? 'grid grid-cols-2 sm:grid-cols-4 gap-3' : 'space-y-3'">
         <RecipeCard v-for="recipe in store.recipes" :key="recipe.id" :recipe="recipe"
           :tile="activeTab === 'mine'" @status="handleStatusChange" />
       </div>
