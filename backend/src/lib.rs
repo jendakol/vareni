@@ -147,6 +147,7 @@ pub fn create_router(state: AppState) -> Router {
         .fallback_service(
             ServeDir::new(&static_dir).fallback(ServeFile::new(format!("{static_dir}/index.html"))),
         )
+        .layer(axum::middleware::map_response(static_cache_headers))
         .layer(prometheus_layer)
         .layer(
             TraceLayer::new_for_http()
@@ -157,4 +158,28 @@ pub fn create_router(state: AppState) -> Router {
                 .on_response(DefaultOnResponse::new().level(Level::INFO)),
         )
         .with_state(state)
+}
+
+/// Hashed assets are immutable; everything else (index.html) must be revalidated.
+async fn static_cache_headers(
+    uri: axum::http::Uri,
+    mut res: axum::response::Response,
+) -> axum::response::Response {
+    use axum::http::{HeaderValue, header::CACHE_CONTROL};
+    if res.status().is_success() && !res.headers().contains_key(CACHE_CONTROL) {
+        let is_html = res
+            .headers()
+            .get(axum::http::header::CONTENT_TYPE)
+            .is_some_and(|v| v.as_bytes().starts_with(b"text/html"));
+        let value = if uri.path().starts_with("/assets/") && !is_html {
+            "public, max-age=31536000, immutable"
+        } else if !uri.path().starts_with("/api/") && uri.path() != "/metrics" {
+            "no-cache"
+        } else {
+            return res;
+        };
+        res.headers_mut()
+            .insert(CACHE_CONTROL, HeaderValue::from_static(value));
+    }
+    res
 }

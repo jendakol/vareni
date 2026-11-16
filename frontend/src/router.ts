@@ -26,6 +26,19 @@ export const router = createRouter({
   },
 })
 
+// One automatic IdP redirect per minute; a failed login lands on /login instead of looping
+const AUTO_LOGIN_KEY = 'auto_login_at'
+function mayAutoLogin(): boolean {
+  try {
+    const last = Number(sessionStorage.getItem(AUTO_LOGIN_KEY))
+    if (last && Date.now() - last < 60_000) return false
+    sessionStorage.setItem(AUTO_LOGIN_KEY, String(Date.now()))
+    return true
+  } catch {
+    return false
+  }
+}
+
 // Navigation guard: require a valid session for non-public pages
 router.beforeEach(async (to) => {
   if (to.path === '/login' || to.path.startsWith('/r/')) return
@@ -37,7 +50,12 @@ router.beforeEach(async (to) => {
     await auth.fetchMe()
   } catch (e) {
     // Only a real 401 means logged out; outages must not look like logout
-    const error = e instanceof ApiError && e.status === 401 ? undefined : 'server_unavailable'
+    const unauthorized = e instanceof ApiError && e.status === 401
+    if (unauthorized && mayAutoLogin()) {
+      window.location.href = `/api/auth/login?return_url=${encodeURIComponent(to.fullPath)}`
+      return false
+    }
+    const error = unauthorized ? undefined : 'server_unavailable'
     return { path: '/login', query: { ...(error && { error }), redirect: to.fullPath } }
   }
 })
