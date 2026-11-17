@@ -296,8 +296,10 @@ impl AnthropicClient {
 ```
 
 **Models:**
-- `claude-haiku-4-5-20251001` – ingestion, meal plan suggestions
-- `claude-sonnet-4-6` – recipe chat/editing
+- `claude-haiku-5-5` – meal plan suggestions, discovery
+- `claude-sonnet-5-5` – recipe chat/editing, ingestion
+
+Models are configurable via `AI_MODEL_CHAT`, `AI_MODEL_INGEST`, `AI_MODEL_PLAN`, `AI_MODEL_DISCOVERY`.
 
 **Required headers:**
 ```

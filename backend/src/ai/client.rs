@@ -1,3 +1,4 @@
+use crate::config::{AiModels, Config};
 use futures::Stream;
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
@@ -7,6 +8,7 @@ use tokio_stream::StreamExt;
 pub struct AnthropicClient {
     client: Client,
     api_key: String,
+    models: AiModels,
 }
 
 #[derive(Debug, Serialize)]
@@ -39,7 +41,51 @@ impl AnthropicClient {
         Self {
             client: Client::new(),
             api_key: api_key.to_string(),
+            models: AiModels::default(),
         }
+    }
+
+    pub fn from_config(config: &Config) -> Self {
+        Self {
+            models: config.ai_models.clone(),
+            ..Self::new(&config.anthropic_api_key)
+        }
+    }
+
+    pub fn models(&self) -> &AiModels {
+        &self.models
+    }
+
+    /// Fail if the API reports a configured model as unknown (404).
+    /// Network errors and other statuses only warn: an API hiccup must not block startup.
+    pub async fn verify_models(&self) -> anyhow::Result<()> {
+        let m = &self.models;
+        let mut ids = vec![&m.chat, &m.ingest, &m.plan, &m.discovery];
+        ids.sort();
+        ids.dedup();
+        for id in ids {
+            let result = self
+                .client
+                .get(format!("https://api.anthropic.com/v1/models/{id}"))
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .timeout(std::time::Duration::from_secs(10))
+                .send()
+                .await;
+            match result {
+                Ok(r) if r.status().is_success() => {
+                    tracing::info!(model = %id, "AI model verified")
+                }
+                Ok(r) if r.status() == reqwest::StatusCode::NOT_FOUND => {
+                    anyhow::bail!("configured AI model '{id}' does not exist (check AI_MODEL_*)")
+                }
+                Ok(r) => {
+                    tracing::warn!(model = %id, status = %r.status(), "AI model check failed")
+                }
+                Err(e) => tracing::warn!(model = %id, "AI model check failed: {e}"),
+            }
+        }
+        Ok(())
     }
 
     pub async fn complete(

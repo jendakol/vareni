@@ -61,7 +61,7 @@ pub async fn ingest(
 
     let source_type =
         source_type.ok_or_else(|| AppError::BadRequest("source_type is required".into()))?;
-    let ai_client = AnthropicClient::new(&state.config.anthropic_api_key);
+    let ai_client = AnthropicClient::from_config(&state.config);
 
     let parsed_result: AppResult<ParsedRecipe> = match source_type.as_str() {
         "manual" => {

@@ -107,6 +107,7 @@ impl TestContext {
                 .join(format!("vareni-test-{}", uuid::Uuid::new_v4()))
                 .to_string_lossy()
                 .into_owned(),
+            ai_models: Default::default(),
             embedding_model_dir: None,
             discovery_enabled: false,
             log_api_token: Some("test-log-token".into()),

@@ -4,6 +4,7 @@ use std::env;
 pub struct Config {
     pub database_url: String,
     pub anthropic_api_key: String,
+    pub ai_models: AiModels,
     /// `local` enables dev-only behaviour (insecure cookies, debug auth).
     pub environment: String,
     pub cookie_secure: bool,
@@ -39,6 +40,7 @@ impl Config {
         Ok(Self {
             database_url: env::var("DATABASE_URL")?,
             anthropic_api_key: env::var("ANTHROPIC_API_KEY").unwrap_or_default(),
+            ai_models: AiModels::from_env(),
             environment,
             cookie_secure,
             session_ttl_hours: env::var("SESSION_TTL_HOURS")
@@ -64,6 +66,44 @@ impl Config {
 
     pub fn is_local(&self) -> bool {
         self.environment == "local"
+    }
+}
+
+/// Claude model IDs per feature, overridable via `AI_MODEL_*` env vars.
+#[derive(Clone, Debug)]
+pub struct AiModels {
+    pub chat: String,
+    pub ingest: String,
+    pub plan: String,
+    pub discovery: String,
+}
+
+impl Default for AiModels {
+    fn default() -> Self {
+        Self {
+            chat: "claude-sonnet-5-5".into(),
+            ingest: "claude-sonnet-5-5".into(),
+            plan: "claude-haiku-5-5".into(),
+            discovery: "claude-haiku-5-5".into(),
+        }
+    }
+}
+
+impl AiModels {
+    fn from_env() -> Self {
+        let default = Self::default();
+        let var = |k: &str, d: String| {
+            env::var(k)
+                .ok()
+                .filter(|v| !v.trim().is_empty())
+                .unwrap_or(d)
+        };
+        Self {
+            chat: var("AI_MODEL_CHAT", default.chat),
+            ingest: var("AI_MODEL_INGEST", default.ingest),
+            plan: var("AI_MODEL_PLAN", default.plan),
+            discovery: var("AI_MODEL_DISCOVERY", default.discovery),
+        }
     }
 }
 

@@ -4,8 +4,6 @@
 use crate::ai::client::{AnthropicClient, Message};
 use serde::{Deserialize, Serialize};
 
-const DISCOVERY_MODEL: &str = "claude-haiku-4-5-20251001";
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ScoringResult {
     pub canonical_name: String,
@@ -74,7 +72,7 @@ pub async fn score_candidate(
     }];
 
     let response = client
-        .complete(DISCOVERY_MODEL, &system, messages, 1024)
+        .complete(&client.models().discovery, &system, messages, 1024)
         .await?;
     let json_str = extract_json(&response);
     let result: ScoringResult = serde_json::from_str(json_str).map_err(|e| {
@@ -104,7 +102,7 @@ pub async fn translate_query(
     }];
 
     let response = client
-        .complete(DISCOVERY_MODEL, &system, messages, 100)
+        .complete(&client.models().discovery, &system, messages, 100)
         .await?;
 
     Ok(response.trim().to_string())

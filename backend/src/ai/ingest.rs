@@ -2,7 +2,6 @@ use crate::ai::client::{AnthropicClient, Message};
 use crate::models::{IngredientInput, StepInput};
 use serde::{Deserialize, Serialize};
 
-const INGEST_MODEL: &str = "claude-sonnet-4-6";
 const INGEST_SYSTEM: &str = r#"You are a recipe parser for a Czech cooking app. ALL output MUST be in Czech language.
 Extract the recipe from the user's input and return ONLY valid JSON. No preamble, no markdown, no explanation.
 
@@ -98,7 +97,7 @@ pub async fn parse_text(client: &AnthropicClient, text: &str) -> anyhow::Result<
     }];
 
     let response = client
-        .complete(INGEST_MODEL, INGEST_SYSTEM, messages, 4096)
+        .complete(&client.models().ingest, INGEST_SYSTEM, messages, 4096)
         .await?;
     let json_str = extract_json(&response);
     let parsed: ParsedRecipe = serde_json::from_str(json_str)?;
@@ -151,7 +150,7 @@ pub async fn parse_images(
     }];
 
     let response = client
-        .complete(INGEST_MODEL, INGEST_SYSTEM, messages, 4096)
+        .complete(&client.models().ingest, INGEST_SYSTEM, messages, 4096)
         .await?;
     let json_str = extract_json(&response);
     let parsed: ParsedRecipe = serde_json::from_str(json_str)?;

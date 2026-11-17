@@ -13,8 +13,6 @@ use crate::auth::AuthUser;
 use crate::db;
 use crate::error::{AppError, AppResult};
 
-const CHAT_MODEL: &str = "claude-sonnet-4-6";
-
 #[derive(Debug, Deserialize)]
 pub struct ChatRequest {
     pub message: String,
@@ -40,9 +38,15 @@ pub async fn chat(
         content: serde_json::json!(body.message),
     }];
 
-    let ai_client = AnthropicClient::new(&state.config.anthropic_api_key);
+    let ai_client = AnthropicClient::from_config(&state.config);
     let byte_stream = ai_client
-        .stream_raw(CHAT_MODEL, &system, messages, Some(tools), 4096)
+        .stream_raw(
+            &ai_client.models().chat,
+            &system,
+            messages,
+            Some(tools),
+            4096,
+        )
         .await
         .map_err(AppError::Internal)?;
 

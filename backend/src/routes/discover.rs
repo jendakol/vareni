@@ -28,7 +28,7 @@ pub async fn discover(
     let count = body.count.unwrap_or(5).min(10);
     let planning_for = body.planning_for.as_deref().unwrap_or("both");
 
-    let client = AnthropicClient::new(&state.config.anthropic_api_key);
+    let client = AnthropicClient::from_config(&state.config);
 
     // Gather user context
     let restrictions = if planning_for == "me" {

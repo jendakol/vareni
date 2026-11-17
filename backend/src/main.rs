@@ -66,6 +66,13 @@ async fn main() -> anyhow::Result<()> {
         .timeout(std::time::Duration::from_secs(10))
         .build()?;
 
+    if config.anthropic_api_key.is_empty() {
+        tracing::warn!("ANTHROPIC_API_KEY not set — AI features will fail");
+    } else {
+        let ai_client = cooking_app::ai::client::AnthropicClient::from_config(&config);
+        ai_client.verify_models().await?;
+    }
+
     // Load ONNX model on a blocking thread to avoid async runtime deadlock (spec section 8.3)
     let embedding = if config.discovery_enabled {
         match &config.embedding_model_dir {

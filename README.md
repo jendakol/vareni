@@ -206,6 +206,10 @@ Nastavení přes proměnné prostředí (soubor `.env`). Docker Compose nastaví
 |-----------------------|------------------------------------------|---------------------|
 | `DATABASE_URL`        | PostgreSQL connection string             | povinné*            |
 | `ANTHROPIC_API_KEY`   | API klíč pro Claude                      | povinné             |
+| `AI_MODEL_CHAT`       | Claude model pro chat                    | `claude-sonnet-5-5` |
+| `AI_MODEL_INGEST`     | Claude model pro import receptů          | `claude-sonnet-5-5` |
+| `AI_MODEL_PLAN`       | Claude model pro plán jídelníčku         | `claude-haiku-5-5`  |
+| `AI_MODEL_DISCOVERY`  | Claude model pro discovery               | `claude-haiku-5-5`  |
 | `OIDC_ISSUER_URL`     | Issuer Keycloaku (musí přesně odpovídat `iss`) | nutné pro login       |
 | `OIDC_CLIENT_ID`      | Client ID v Keycloaku                    | nutné pro login             |
 | `OIDC_CLIENT_SECRET`  | Secret confidential klienta              | nutné pro login             |

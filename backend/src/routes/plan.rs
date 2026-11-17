@@ -59,7 +59,7 @@ pub async fn suggest(
     let preferences_json = serde_json::to_string(&preferences).unwrap_or_default();
     let recipes_json = serde_json::to_string(&recipes).unwrap_or_default();
 
-    let ai_client = AnthropicClient::new(&state.config.anthropic_api_key);
+    let ai_client = AnthropicClient::from_config(&state.config);
     let suggestions = ai::plan::suggest(
         &ai_client,
         &history_json,

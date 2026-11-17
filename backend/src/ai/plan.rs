@@ -2,8 +2,6 @@ use crate::ai::client::{AnthropicClient, Message};
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
-const PLAN_MODEL: &str = "claude-haiku-4-5-20251001";
-
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SuggestedEntry {
     pub date: String,
@@ -58,7 +56,9 @@ pub async fn suggest(
         content: serde_json::json!(prompt),
     }];
 
-    let response = client.complete(PLAN_MODEL, &system, messages, 4096).await?;
+    let response = client
+        .complete(&client.models().plan, &system, messages, 4096)
+        .await?;
     let json_str = extract_json_array(&response);
     let suggestions: Vec<SuggestedEntry> = serde_json::from_str(json_str).map_err(|e| {
         tracing::error!("Failed to parse plan AI response: {e}\nRaw response: {response}");
