@@ -59,9 +59,56 @@ docker compose up -d
 
 Bez modelu aplikace funguje normálně — jen funkce discovery vrací 503.
 
-## Spuštění bez Docker Compose
+## Příklady nasazení
 
-Pokud nechcete použít Compose (např. máte vlastní PostgreSQL), můžete aplikaci spustit přímo:
+### docker-compose.yml
+
+Repozitářový `docker-compose.yml` staví image z lokálních zdrojů. Varianta s povoleným discovery
+(model stažený podle kroku 3) a s hodnotami přímo v souboru místo `.env`:
+
+```yaml
+services:
+  postgres:
+    image: pgvector/pgvector:pg18
+    environment:
+      POSTGRES_USER: cooking
+      POSTGRES_PASSWORD: cooking   # změňte, pokud je DB dostupná mimo Compose síť
+      POSTGRES_DB: cookingapp
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    restart: unless-stopped
+
+  app:
+    build: .
+    ports:
+      - "8080:8080"
+    environment:
+      DATABASE_URL: postgresql://cooking:cooking@postgres:5432/cookingapp
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY}
+      BASE_URL: https://vareni.example.com
+      OIDC_ISSUER_URL: https://keycloak.example.com/realms/master
+      OIDC_CLIENT_ID: vareni
+      OIDC_CLIENT_SECRET: ${OIDC_CLIENT_SECRET}
+      OIDC_REDIRECT_URI: https://vareni.example.com/api/auth/callback
+      EMBEDDING_MODEL_DIR: /app/models/all-MiniLM-L6-v2
+    volumes:
+      - uploads:/app/uploads
+      - ./models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2:ro
+    depends_on:
+      - postgres
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  uploads:
+```
+
+`${ANTHROPIC_API_KEY}` a `${OIDC_CLIENT_SECRET}` Compose doplní z prostředí nebo ze souboru `.env`
+vedle `docker-compose.yml`. Secrety do souboru nepište natvrdo.
+
+### docker run (bez Compose)
+
+Pokud nechcete použít Compose (např. máte vlastní PostgreSQL), sestavte image a spusťte ho přímo:
 
 ```bash
 docker build -t vareni .
@@ -82,8 +129,26 @@ docker run -d \
   --name vareni \
   -p 8080:8080 \
   -v vareni-uploads:/app/uploads \
-  -v ./models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2:ro \
+  -v "$PWD/models/all-MiniLM-L6-v2:/app/models/all-MiniLM-L6-v2:ro" \
   -e EMBEDDING_MODEL_DIR=/app/models/all-MiniLM-L6-v2 \
+  --env-file .env \
+  vareni
+```
+
+Kompletní příklad včetně vlastní databáze na sdílené síti:
+
+```bash
+docker network create vareni-net
+
+docker run -d --name vareni-db --network vareni-net \
+  -e POSTGRES_USER=cooking -e POSTGRES_PASSWORD=cooking -e POSTGRES_DB=cookingapp \
+  -v vareni-pgdata:/var/lib/postgresql/data \
+  pgvector/pgvector:pg18
+
+docker run -d --name vareni --network vareni-net \
+  -p 8080:8080 \
+  -v vareni-uploads:/app/uploads \
+  -e DATABASE_URL=postgresql://cooking:cooking@vareni-db:5432/cookingapp \
   --env-file .env \
   vareni
 ```
@@ -139,10 +204,12 @@ Nastavení přes proměnné prostředí (soubor `.env`). Docker Compose nastaví
 | `OIDC_ROLE_CLAIM`     | Claim s rolemi (tečková cesta povolena)  | `roles`             |
 | `SESSION_TTL_HOURS`   | Platnost session                         | `720` (30 dní)      |
 | `COOKIE_SECURE`       | Secure cookie (v produkci nelze vypnout) | `true`              |
-| `ENVIRONMENT`         | `local` povolí HTTP vývoj a `debug-auth` | `production`        |
+| `ENVIRONMENT`         | `local` povolí HTTP vývoj (a dev-login při buildu s feature `debug-auth`) | `production`        |
 | `BASE_URL`            | Veřejná URL aplikace                     | `http://localhost:8080` |
 | `EMBEDDING_MODEL_DIR` | Cesta k ONNX embedding modelu            | volitelné           |
 | `DISCOVERY_ENABLED`   | Povolení discovery                       | `true`              |
+| `LOG_API_TOKEN`       | Bearer token pro `POST /api/log` (Home Assistant) | volitelné   |
+| `METRICS_GAUGE_REFRESH_SECS` | Jak často se obnovuje gauge `recipes_total` | `60`        |
 
 \* Docker Compose nastavuje `DATABASE_URL` automaticky — nemusíte ho vyplňovat v `.env`.
 

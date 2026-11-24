@@ -63,7 +63,7 @@ Consequently every form-created recipe is stored as `source_type='manual'`, `sou
 
 Replacement: when a recipe has no `source_url`, the detail shows a low-key **„+ přidat odkaz"** affordance that opens the edit form focused on the new field, so links get filled in as the user meets the recipes.
 
-*(Not verified against production: the `DATABASE_URL` credentials in `.env` fail authentication against `cloud.jenda.eu`. The conclusion follows from the code paths, which admit no other writer. Confirmation query, if wanted: `SELECT source_type, status, count(*), count(source_url) FROM recipes GROUP BY 1,2;`)*
+*(Not verified against production: the `DATABASE_URL` credentials in `.env` fail authentication against production. The conclusion follows from the code paths, which admit no other writer. Confirmation query, if wanted: `SELECT source_type, status, count(*), count(source_url) FROM recipes GROUP BY 1,2;`)*
 
 ### Clear-vs-keep semantics (applies to three columns)
 
